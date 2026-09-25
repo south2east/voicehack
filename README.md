@@ -7,7 +7,7 @@
 | スペクトル表示 | `spectrum.png` (原音 / 音声 / 環境音を重ね描き, 主要ピーク注記) | Welch 1967 (平均ピリオドグラム), Harris 1978 (Hann 窓) |
 | スペクトログラム表示 | `spectrogram.png` (線形周波数 + メル 80 帯域, F0 重ね描き) | Allen 1977 (STFT/OLA), O'Shaughnessy 1987 (mel 尺度) |
 | 周波数・大きさの数値化 | `report.json` / `frames.csv` (フレーム毎) | 主要ピーク (放物線補間), オクターブバンド (IEC 61260), スペクトル重心 / 広がり / rolloff / 平坦度 (Peeters 2004, Johnston 1988) |
-| ノイズ分離 (環境音だけ取り出す) | `speech.wav`, `environment.wav`, `separation.png` | MCRA 雑音推定 (Cohen & Berdugo 2002) + MMSE-LSA (Ephraim & Malah 1985) + decision-directed 事前 SNR (Ephraim & Malah 1984) + OM-LSA の存在確率ゲート (Cohen & Berdugo 2001) |
+| ノイズ分離 (環境音だけ取り出す) | `speech.wav`, `environment.wav`, `separation.png` | MCRA 雑音推定 (Cohen & Berdugo 2002) + MMSE-LSA (Ephraim & Malah 1985) + decision-directed 事前 SNR (Ephraim & Malah 1984) + OM-LSA の存在確率ゲート (Cohen & Berdugo 2001) + 周期性による音声区間ゲート (Tucker 1992) |
 | 大きさ | LUFS (integrated / momentary / short-term), LRA, RMS dBFS, peak, crest factor | ITU-R BS.1770-4, EBU Tech 3341 / 3342 |
 | トーン (声の高さ・抑揚) | F0 輪郭, 中央値 (Hz と音名), 5–95% 範囲, 抑揚幅 (半音) | YIN (de Cheveigné & Kawahara 2002) + 話者音域の 2 パス推定 (Hirst 2011) |
 | スピード | 音節数, 発話速度 / 調音速度 [音節/s], ポーズ数 | 音節核検出 (de Jong & Wempe 2009) |
@@ -68,12 +68,13 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 
 ## 既知の限界
 
-- **MCRA は定常〜緩やかに変化する雑音向け.** 空調・ハム・走行音などは環境音側に分かれますが,
-  短く途切れる音 (電子音・ドア・食器など) は「音声」と区別できず音声側に残ります.
-  これを分けるには学習ベースの手法 (例: Conv-TasNet, Luo & Mesgarani 2019 /
-  DeepFilterNet, Schröter et al. 2022) が必要です.
+- **突発音の分離は「声と重なっていない」場合のみ.** MCRA は定常雑音 (空調・ハムなど) を,
+  周期性ゲートは声から離れた突発音 (机を叩く音・拍手・クリック) を環境音側に回します.
+  実録音で, 声から離れた打撃音 10 回すべてで声側に残る割合が 29〜80% → 0.3% に, 声の保持率は 99.8〜100%.
+  一方, **発話と同時に鳴った突発音は分けられません** (机を叩きながら話した例で 39〜99% が声側に残る).
+  これには学習ベースの手法 (例: Conv-TasNet, Luo & Mesgarani 2019 / DeepFilterNet, Schröter et al. 2022) が必要です.
+- 周期的な環境音 (楽器・電子音・他人の声) は「声」と判定されます.
 - 雑音の初期推定は「録音中で最も静かな 20% のフレーム」から取ります. 雑音レベルが大きく変わる場合は, MCRA が 1〜2 秒かけて追従します.
-- マウスのクリックや衣擦れなどの物音は, 2 パス F0 推定で声の音域外なら音節から外れますが, 分離では音声側に残ります.
 - 音節核検出は音節数を少なめに数える傾向があります (原論文も絶対数ではなく人手計数との相関で評価).
   速度の **比較** には向いていますが, 絶対値の目安にとどめてください. 日本語のモーラ数とは一致しません.
 - 発話速度は録音全長ではなく「最初〜最後の音節核」の区間で割っています
@@ -92,4 +93,5 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 - I. Cohen, B. Berdugo, IEEE SPL 9(1), 2002 (MCRA); Signal Processing 81(11), 2001 (OM-LSA).
 - Y. Ephraim, D. Malah, IEEE TASSP 32(6), 1984; 33(2), 1985.
 - O. Cappé, IEEE TSAP 2(2), 1994.
+- R. Tucker, IEE Proceedings-I 139(4), 1992.
 - N. H. de Jong, T. Wempe, Behavior Research Methods 41(2), 2009.

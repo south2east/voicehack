@@ -88,3 +88,21 @@ def test_leading_digital_silence_does_not_stick_speech_presence():
     sep = separate(y, SR)
     t = sep.S.t
     assert sep.speech_prob.mean(axis=0)[(t > 0.3) & (t < 2.0)].mean() < 0.2
+
+
+def test_voicing_gate_moves_isolated_knock_to_environment():
+    # 0.5 s の調波音 (声) と, そこから 1 s 離れた机を叩くような減衰ノイズバースト
+    rng = np.random.default_rng(4)
+    n = SR * 4
+    t = np.arange(n) / SR
+    voice = 0.3 * sum(np.sin(2 * np.pi * 150 * k * t) / k for k in range(1, 12)) \
+        * ((t > 1.0) & (t < 1.5))
+    knock = np.zeros(n)
+    k0 = int(2.8 * SR)
+    knock[k0:k0 + 1600] = rng.standard_normal(1600) * np.exp(-np.arange(1600) / 200)
+    y = voice + knock + 0.003 * rng.standard_normal(n)
+    sep = separate(y, SR)
+    w = slice(k0, k0 + 800)
+    assert np.sum(sep.speech[w] ** 2) / np.sum(y[w] ** 2) < 0.05
+    v = slice(int(1.1 * SR), int(1.4 * SR))
+    assert np.sum(sep.speech[v] ** 2) / np.sum(y[v] ** 2) > 0.8

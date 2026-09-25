@@ -13,6 +13,13 @@
 4. OM-LSA の音声存在確率によるゲート
    I. Cohen and B. Berdugo, "Speech enhancement for non-stationary noise
    environments," Signal Processing, 81(11), 2403-2418, 2001.
+5. 周期性 (有声性) に基づく音声区間ゲート
+   R. Tucker, "Voice activity detection using a periodicity measure,"
+   IEE Proceedings-I, 139(4), 377-380, 1992.
+   MCRA は定常雑音しか雑音とみなさないため, 机を叩く音・拍手などの突発音は
+   「音声」側に残る. そこで音声推定から YIN で有声区間を求め, その前後
+   (子音・無声化母音ぶん) を広げた区間の外ではゲインを G_min に落とす.
+   声と時間的に重なった突発音はこの方法では分けられない.
 
 環境音は STFT 領域の残差 E = Y - Ŝ = (1 - G) Y として得る. よって
 speech + environment = 元信号 (STFT の完全再構成の範囲で) が成り立つ.
@@ -26,6 +33,7 @@ import numpy as np
 from scipy.ndimage import uniform_filter1d
 from scipy.special import exp1
 
+from .pitch import yin_two_pass
 from .spectral import STFT, stft
 
 
@@ -37,6 +45,7 @@ class Separation:
     noise_psd: np.ndarray      # (freq, frame) λ_d
     speech_prob: np.ndarray    # (freq, frame) MCRA の音声存在確率 p
     S: STFT
+    voice_region: np.ndarray | None = None  # (frame,) 周期性ゲート [0, 1]
 
 
 def mcra(P: np.ndarray, hop_s: float, alpha_s: float = 0.8, alpha_p: float = 0.2,
@@ -101,19 +110,51 @@ def mmse_lsa(P: np.ndarray, lam: np.ndarray, alpha: float = 0.98,
     return G
 
 
+def voice_region(x: np.ndarray, sr: int, t_frames: np.ndarray, pre_s: float = 0.2,
+                 post_s: float = 0.25, min_voiced_s: float = 0.05,
+                 ramp_s: float = 0.03) -> np.ndarray:
+    """有声区間を前 pre_s / 後 post_s 秒広げた「声の区間」を STFT フレーム上で返す.
+
+    pre_s: 母音に先行する子音 (摩擦音・破裂音) ぶん.
+    post_s: 語末の無声化母音 (「です」の「す」など) ぶん.
+    min_voiced_s 未満の孤立した有声判定 (机の共鳴など) は捨てる.
+    """
+    p = yin_two_pass(x, sr)
+    v = p.voiced.copy()
+    hop = float(p.t[1] - p.t[0]) if len(p.t) > 1 else 0.01
+    # 短い有声ランを除去
+    edges = np.diff(np.concatenate([[0], v.astype(int), [0]]))
+    for a, b in zip(np.nonzero(edges == 1)[0], np.nonzero(edges == -1)[0]):
+        if (b - a) * hop < min_voiced_s:
+            v[a:b] = False
+    # 区間 [i - post, i + pre] に有声フレームがあれば声の区間
+    pre, post = int(round(pre_s / hop)), int(round(post_s / hop))
+    cs = np.concatenate([[0], np.cumsum(v)])
+    idx = np.arange(len(v))
+    region = (cs[np.minimum(len(v), idx + pre + 1)] - cs[np.maximum(0, idx - post)]) > 0
+    # 境界のクリック音を避けるため短い ramp で平滑
+    soft = uniform_filter1d(region.astype(float), size=max(1, int(round(ramp_s / hop))))
+    return np.interp(t_frames, p.t, soft, left=0.0, right=0.0)
+
+
 def separate(x: np.ndarray, sr: int, g_min_db: float = -25.0,
-             presence_gate: bool = True) -> Separation:
+             presence_gate: bool = True, voicing_gate: bool = True) -> Separation:
     S = stft(x, sr, win_s=0.032, hop_ratio=0.25)
     hop_s = S.sft.hop / sr
     P = S.power
     lam, p = mcra(P, hop_s)
     G = mmse_lsa(P, lam)
+    gmin = 10 ** (g_min_db / 20)
     if presence_gate:
         # OM-LSA (Cohen & Berdugo 2001): G = G_H1^p · G_min^(1-p)
         # p は時間方向に軽く平滑 (≈50 ms) してから使う
         ps = uniform_filter1d(p, size=max(1, int(0.05 / hop_s)), axis=1)
-        gmin = 10 ** (g_min_db / 20)
         G = np.maximum(G, gmin) ** ps * gmin ** (1 - ps)
+    region = None
+    if voicing_gate:
+        # 周期性ゲート (Tucker 1992): 声の区間の外は G_min へ
+        region = voice_region(S.inverse(G * S.X), sr, S.t)
+        G = gmin + (G - gmin) * region[None, :]
     speech = S.inverse(G * S.X)
     env = S.inverse((1 - G) * S.X)
-    return Separation(speech, env, G, lam, p, S)
+    return Separation(speech, env, G, lam, p, S, region)
