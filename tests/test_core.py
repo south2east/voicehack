@@ -110,7 +110,7 @@ def test_voicing_gate_moves_isolated_knock_to_environment():
 
 @pytest.mark.parametrize("rate", [3.0, 6.0])
 def test_subband_rate_counts_syllable_train(rate):
-    from voicehack.pitch import yin_two_pass
+    from voicehack.pitch import pitch_track
     from voicehack.rate import subband_rate
     # 母音 /a/ と /i/ 相当のフォルマントを交互に持つ音節列 (谷は -12 dB 程度まで)
     t = np.arange(int(4 * SR)) / SR
@@ -120,7 +120,7 @@ def test_subband_rate_counts_syllable_train(rate):
     syl = np.floor(t * rate).astype(int) % 2
     am = 0.25 + 0.75 * np.sin(np.pi * (t * rate % 1.0)) ** 2
     x = 0.2 * np.where(syl == 0, a, i) * am * ((t > 0.5) & (t < 3.5))
-    r = subband_rate(x, SR, yin_two_pass(x, SR))
+    r = subband_rate(x, SR, pitch_track(x, SR))
     assert r["speech_rate_syll_per_s"] == pytest.approx(rate, rel=0.15)
 
 
@@ -136,3 +136,20 @@ def test_mora_counting():
     }
     for text, n in cases.items():
         assert count_morae(to_kana(text)) == n, (text, to_kana(text))
+
+
+def test_pitch_track_follows_glide_beyond_speaker_range():
+    from voicehack.pitch import pitch_track
+
+    # 130 Hz 付近の平叙発話 3 s + 100→300 Hz へ滑らかに上がる「あー」2 s
+    t1 = np.arange(3 * SR) / SR
+    f1 = 130 + 10 * np.sin(2 * np.pi * 0.8 * t1)
+    t2 = np.arange(2 * SR) / SR
+    f2 = 100 * 3.0 ** (t2 / 2)
+    f = np.concatenate([f1, f2])
+    ph = 2 * np.pi * np.cumsum(f) / SR
+    x = 0.3 * sum(np.sin(k * ph) / k for k in range(1, 10))
+    p = pitch_track(x, SR)
+    late = (p.t > 4.75) & (p.t < 4.95)         # 真値 ≈ 262-290 Hz (声域上限 ≈ 1.5·Q3 より上)
+    assert np.nanmin(p.f0[late]) > 255
+    assert p.voiced[late].mean() > 0.9

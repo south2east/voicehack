@@ -12,7 +12,7 @@ from . import plots
 from .audio_io import Audio, save
 from .denoise import separate
 from .loudness import level_summary, loudness, rms_db
-from .pitch import pitch_summary, yin_two_pass
+from .pitch import pitch_summary, pitch_track
 from .rate import modulation_rate, rate_summary, speech_rate, subband_rate
 from .spectral import octave_bands, spectral_features, spectrum, stft
 
@@ -39,7 +39,7 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
     # --- 大きさ / トーン / スピード
     loud = loudness(x, sr)
     rms = rms_db(x, sr)
-    pitch = yin_two_pass(voice, sr)
+    pitch = pitch_track(voice, sr)
     rate = speech_rate(voice, sr, pitch)
     wn = subband_rate(voice, sr, pitch)
     region = sep.voice_region if sep is not None else None

@@ -34,7 +34,7 @@ import numpy as np
 from scipy.ndimage import uniform_filter1d
 from scipy.special import exp1
 
-from .pitch import yin_two_pass
+from .pitch import pitch_track
 from .spectral import STFT, stft
 
 
@@ -121,7 +121,7 @@ def voice_region(x: np.ndarray, sr: int, t_frames: np.ndarray, presence: np.ndar
     全体を声とみなす. 子音や語末の無声化母音 (「です」の「す」) は母音と
     つながっているので残り, 無音を挟んだ突発音は外れる. pad_s は安全余白.
     """
-    p = yin_two_pass(x, sr)
+    p = pitch_track(x, sr)
     v = p.voiced.copy()
     hop = float(p.t[1] - p.t[0]) if len(p.t) > 1 else 0.01
     for a, b in _runs(v):

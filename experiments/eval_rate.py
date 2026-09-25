@@ -17,7 +17,7 @@ from scipy.signal import ShortTimeFFT, find_peaks
 
 from voicehack.audio_io import load
 from voicehack.denoise import separate
-from voicehack.pitch import yin_two_pass
+from voicehack.pitch import pitch_track
 from voicehack.rate import subband_envelope
 
 SR = 16000
@@ -129,7 +129,7 @@ def asr_ratio_errors(utts):
 
 def main():
     data = load_utterances()
-    pitches = {sp: [{s: yin_two_pass(v[0], SR) for s, v in utt.items()} for _, utt in data[sp]]
+    pitches = {sp: [{s: pitch_track(v[0], SR) for s, v in utt.items()} for _, utt in data[sp]]
                for sp in data}
     base = dict(k=3, sigma=1.5, prom=1.5, voicing="yin30")
     grid = [dict(k=k, sigma=sg, prom=pr, voicing=v)

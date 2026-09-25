@@ -9,7 +9,7 @@
 | 周波数・大きさの数値化 | `report.json` / `frames.csv` (フレーム毎) | 主要ピーク (放物線補間), オクターブバンド (IEC 61260), スペクトル重心 / 広がり / rolloff / 平坦度 (Peeters 2004, Johnston 1988) |
 | ノイズ分離 (環境音だけ取り出す) | `speech.wav`, `environment.wav`, `separation.png` | MCRA 雑音推定 (Cohen & Berdugo 2002) + MMSE-LSA (Ephraim & Malah 1985) + decision-directed 事前 SNR (Ephraim & Malah 1984) + OM-LSA の存在確率ゲート (Cohen & Berdugo 2001) + 周期性による音声区間ゲート (Tucker 1992) |
 | 大きさ | LUFS (integrated / momentary / short-term), LRA, RMS dBFS, peak, crest factor | ITU-R BS.1770-4, EBU Tech 3341 / 3342 |
-| トーン (声の高さ・抑揚) | F0 輪郭, 中央値 (Hz と音名), 5–95% 範囲, 抑揚幅 (半音) | YIN (de Cheveigné & Kawahara 2002) + 話者音域の 2 パス推定 (Hirst 2011) |
+| トーン (声の高さ・抑揚) | F0 輪郭, 中央値 (Hz と音名), 5–95% 範囲, 抑揚幅 (半音) | YIN (de Cheveigné & Kawahara 2002) + 話者の声域 (Hirst 2011) と輪郭の連続性による外れ値除去 |
 | スピード | 音節数, 発話速度 / 調音速度 [音節/s], ポーズ数, 変調周波数 [Hz]; `--asr` でモーラ速度 [モーラ/s] と文字起こし | サブバンド相関による音節核検出 (Wang & Narayanan 2007, 主指標), 強度ピーク法 (de Jong & Wempe 2009, 参考), 包絡変調スペクトル (Morgan & Fosler-Lussier 1998, mrate); `--asr`: Whisper (Radford et al. 2023) + UniDic の読みでモーラを数える |
 
 大きさ・トーン・スピードは `prosody.png` にまとめて描画されます. トーンとスピードは, 分離した **音声側** の信号で測ります.
@@ -63,6 +63,8 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 
 実マイク録音 (MacBook Air 内蔵マイク) では, YIN の有声判定を Praat と照合して
 既定値を決めました (再現率 0.73 / 適合率 0.92 / 1 半音超の誤り 5.7%; F0 中央値は Praat・pYIN と一致).
+声域の外まで滑らかに上がる声も追えるよう, 声域で探索範囲を切らずに「跳び離れた断片だけ捨てる」方式にしています
+(実録音 9 本で Praat 比 20% 超の誤り 4.9% → 4.3%, 「あー」上昇の 250 Hz 超の追跡 15/27 → 25/27 フレーム).
 
 デモ音声 (`say` の日本語音声 + ピンクノイズ・ハム・電子音, 入力 SNR ≈ 1 dB) では,
 分離後の音声 SNR が約 +6.5 dB 改善 (1.0 → 7.6 dB). 読み上げ速度を変えた 3 種で,
@@ -105,6 +107,7 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 - ITU-R BS.1770-4 (2015); EBU Tech 3341 / 3342 (2016).
 - A. de Cheveigné, H. Kawahara, JASA 111(4), 2002.
 - D. Hirst, Journal of Speech Sciences 1(1), 2011.
+- P. Boersma, Proc. Institute of Phonetic Sciences Amsterdam 17, 1993.
 - I. Cohen, B. Berdugo, IEEE SPL 9(1), 2002 (MCRA); Signal Processing 81(11), 2001 (OM-LSA).
 - Y. Ephraim, D. Malah, IEEE TASSP 32(6), 1984; 33(2), 1985.
 - O. Cappé, IEEE TSAP 2(2), 1994.
