@@ -32,6 +32,7 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
         y, repairs = enhance_checked(x, sr, sep.speech)
         sep.speech = gate_by_voice_region(x, y, sr, sep=sep)
         sep.environment = x - sep.speech
+        sep.method = "SepFormer (DNS4, per utterance) + voice-region gate"
     voice = sep.speech if sep is not None else x
 
     # --- スペクトル / 数値化

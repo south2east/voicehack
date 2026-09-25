@@ -100,13 +100,20 @@ def separation_plot(sep, sr, path):
         ax.set_title(f"{name}")
         ax.set_ylim(0, min(sr / 2, 8000))
     t = sep.S.t
-    axes[3].plot(t, sep.speech_prob.mean(axis=0), color=SERIES["speech"],
+    # 実際の出力から: フレーム毎に 音声側エネルギー / (音声側 + 環境音側)  (方式によらない)
+    es, ee = S_sp.power.sum(axis=0), S_en.power.sum(axis=0)
+    n = min(len(es), len(ee), len(t))
+    share = es[:n] / (es[:n] + ee[:n] + 1e-20)
+    axes[3].plot(t[:n], share, color=SERIES["original"], label="speech share of energy (output)")
+    if sep.voice_region is not None:
+        axes[3].plot(t, sep.voice_region, color=SERIES["environment"], lw=1.2,
+                     label="voice region (periodicity gate)")
+    axes[3].plot(t, sep.speech_prob.mean(axis=0), color=SERIES["speech"], lw=1.0,
                  label="speech presence (MCRA p, band mean)")
-    axes[3].plot(t, sep.gain.mean(axis=0), color=SERIES["original"], label="gain G (band mean)")
     axes[3].set_ylim(0, 1.02)
     axes[3].set_xlabel("Time [s]")
-    axes[3].legend(loc="upper right")
-    axes[3].set_title("Separation mask")
+    axes[3].legend(loc="center right")
+    axes[3].set_title(f"Separation: {getattr(sep, 'method', 'MCRA + OM-LSA + voice-region gate')}")
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)

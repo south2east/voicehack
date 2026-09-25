@@ -180,3 +180,38 @@ def test_enhance_checked_per_utterance_and_fallback(monkeypatch):
     assert np.allclose(y[seg1], x[seg1])
     assert np.allclose(y[seg2], conv[seg2])
     assert np.all(y[int(1.9 * SR):int(2.1 * SR)] == 0)          # 発話 ± 0.5 s の外は DNN に通さない
+
+
+def test_cli_analyze_end_to_end(tmp_path):
+    """合成音声 (声 + ハム + 机を叩くような突発音) を CLI で解析し, 出力一式と主要な値を確かめる."""
+    import json
+
+    import soundfile as sf
+
+    from voicehack.cli import main
+
+    rng = np.random.default_rng(6)
+    t = np.arange(int(5 * SR)) / SR
+    ph = 2 * np.pi * np.cumsum(160 + 30 * np.sin(2 * np.pi * 0.7 * t)) / SR
+    syl = (np.sin(np.pi * 4 * t) ** 2) * ((t > 1.0) & (t < 3.5))
+    voice = 0.3 * sum(np.sin(k * ph) / k for k in range(1, 15)) * syl
+    knock = np.zeros_like(t)
+    k0 = int(4.3 * SR)
+    knock[k0:k0 + 1600] = 0.5 * rng.standard_normal(1600) * np.exp(-np.arange(1600) / 200)
+    x = voice + 0.01 * np.sin(2 * np.pi * 60 * t) + 0.003 * rng.standard_normal(len(t)) + knock
+    wav = tmp_path / "in.wav"
+    sf.write(wav, x, SR, subtype="FLOAT")
+    out = tmp_path / "out"
+    main(["analyze", str(wav), "-o", str(out)])
+
+    for f in ("report.json", "frames.csv", "spectrum.png", "spectrogram.png", "prosody.png",
+              "separation.png", "speech.wav", "environment.wav"):
+        assert (out / f).stat().st_size > 0, f
+    r = json.loads((out / "report.json").read_text())
+    assert 150 < r["pitch"]["median_f0_hz"] < 200
+    assert r["rate"]["syllables"] >= 5
+    sp, _ = sf.read(out / "speech.wav")
+    en, _ = sf.read(out / "environment.wav")
+    np.testing.assert_allclose(sp + en, x, atol=1e-5)
+    w = slice(k0, k0 + 800)                       # 声から離れた突発音は環境音側へ
+    assert np.sum(sp[w] ** 2) < 0.05 * np.sum(x[w] ** 2)
