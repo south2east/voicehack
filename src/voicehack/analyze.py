@@ -18,13 +18,20 @@ from .spectral import octave_bands, spectral_features, spectrum, stft
 
 
 def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
-            asr: bool = False) -> dict:
+            asr: bool = False, dnn: bool = False) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     x, sr = audio.x, audio.sr
 
     # --- ノイズ分離: 韻律 (トーン/スピード) は分離後の音声で測る
     sep = separate(x, sr) if separate_noise else None
+    if sep is not None and dnn:
+        # 声と重なった突発音も分ける: SepFormer の音声推定 + 周期性ゲート
+        from .dnn import enhance_checked, gate_by_voice_region
+
+        y, repairs = enhance_checked(x, sr, sep.speech)
+        sep.speech = gate_by_voice_region(x, y, sr, sep=sep)
+        sep.environment = x - sep.speech
     voice = sep.speech if sep is not None else x
 
     # --- スペクトル / 数値化
@@ -67,6 +74,8 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
         summary["rate"]["asr"] = mora_rate(voice, sr)
     if sep is not None:
         summary["separation"] = {
+            "method": "SepFormer (DNS4) + voice-region gate" if dnn else
+                      "MCRA + MMSE-LSA + OM-LSA + voice-region gate",
             "speech": {**level_summary(sep.speech),
                        "integrated_lufs": loudness(sep.speech, sr)["integrated_lufs"],
                        "dominant_peaks": specs["speech"].peaks},
@@ -75,6 +84,8 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
                             "dominant_peaks": specs["environment"].peaks,
                             "octave_bands": octave_bands(sep.environment, sr)},
         }
+        if dnn:
+            summary["separation"]["dnn_segments"] = repairs
         save(out / "speech.wav", Audio(sep.speech, sr))
         save(out / "environment.wav", Audio(sep.environment, sr))
 

@@ -153,3 +153,30 @@ def test_pitch_track_follows_glide_beyond_speaker_range():
     late = (p.t > 4.75) & (p.t < 4.95)         # 真値 ≈ 262-290 Hz (声域上限 ≈ 1.5·Q3 より上)
     assert np.nanmin(p.f0[late]) > 255
     assert p.voiced[late].mean() > 0.9
+
+
+def test_enhance_checked_per_utterance_and_fallback(monkeypatch):
+    """発話ごとに DNN を掛け, 声を消した発話は従来法の出力に置き換える."""
+    import voicehack.dnn as dnn
+
+    t = np.arange(4 * SR) / SR
+    ph = 2 * np.pi * np.cumsum(150 + 20 * np.sin(2 * np.pi * t)) / SR
+    voice = 0.3 * sum(np.sin(k * ph) / k for k in range(1, 12))
+    x = voice * (((t > 0.5) & (t < 1.3)) | ((t > 2.7) & (t < 3.5))) \
+        + 0.002 * np.random.default_rng(5).standard_normal(len(t))
+    conv = x.copy()
+    calls = []
+
+    def fake_enhance(sig, sr):
+        calls.append(len(sig) / sr)
+        # 2 つ目の発話 (呼び出し 2 回目) だけ声を消してしまう失敗
+        return sig * (0.01 if len(calls) == 2 else 1.0)
+
+    monkeypatch.setattr(dnn, "enhance", fake_enhance)
+    y, log = dnn.enhance_checked(x, SR, conv)
+    assert len(calls) == 2 and all(c < 2.5 for c in calls)   # 発話単位で呼ばれる
+    assert [l["action"] for l in log] == ["dnn", "fallback"]
+    seg1, seg2 = slice(int(0.7 * SR), int(1.1 * SR)), slice(int(2.9 * SR), int(3.3 * SR))
+    assert np.allclose(y[seg1], x[seg1])
+    assert np.allclose(y[seg2], conv[seg2])
+    assert np.all(y[int(1.9 * SR):int(2.1 * SR)] == 0)          # 発話 ± 0.5 s の外は DNN に通さない

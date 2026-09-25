@@ -81,10 +81,12 @@ def count_morae(kana: str) -> int:
 
 def active_intervals(x: np.ndarray, sr: int, min_pause_s: float = 0.3,
                      min_len_s: float = 0.1) -> list[tuple[float, float]]:
-    """発話区間: 30 ms RMS が雑音床 (10 パーセンタイル) + 12 dB を超える区間.
+    """発話区間: 30 ms RMS が 雑音床 (10 パーセンタイル) + 12 dB と
+    上位レベル (99 パーセンタイル) - 35 dB の高い方を超える区間.
+    後者は DNN 出力のように無音部がほぼ無音で雑音床が極端に低い場合の下限.
     min_pause_s 未満の隙間は埋める."""
     t, r = rms_db(x, sr)
-    act = r > np.percentile(r, 10) + 12.0
+    act = r > max(np.percentile(r, 10) + 12.0, np.percentile(r, 99) - 35.0)
     out: list[list[float]] = []
     start = None
     for i, a in enumerate(np.append(act, False)):

@@ -55,6 +55,8 @@ def main(argv: list[str] | None = None) -> None:
     a.add_argument("-o", "--out", default=None, help="出力先 (既定: out/<ファイル名>)")
     a.add_argument("--sr", type=int, default=None, help="解析前にリサンプル")
     a.add_argument("--no-separate", action="store_true", help="ノイズ分離をしない")
+    a.add_argument("--dnn", action="store_true",
+                   help="深層学習 (SepFormer) で声と重なった物音も分離 (要: uv sync --extra dnn)")
     a.add_argument("--asr", action="store_true",
                    help="音声認識でモーラ速度を測る (要: uv sync --extra asr)")
 
@@ -63,18 +65,19 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--sr", type=int, default=16000)
     r.add_argument("-o", "--out", default="out/recording")
     r.add_argument("--asr", action="store_true", help="音声認識でモーラ速度を測る")
+    r.add_argument("--dnn", action="store_true", help="深層学習で声と重なった物音も分離")
 
     args = ap.parse_args(argv)
     if args.cmd == "analyze":
         audio = load(args.input, sr=args.sr)
         out = args.out or f"out/{Path(args.input).stem}"
-        s = analyze(audio, out, separate_noise=not args.no_separate, asr=args.asr)
+        s = analyze(audio, out, separate_noise=not args.no_separate, asr=args.asr, dnn=args.dnn)
     else:
         audio = record(args.duration, args.sr)
         out = args.out
         Path(out).mkdir(parents=True, exist_ok=True)
         save(Path(out) / "input.wav", audio)
-        s = analyze(audio, out, asr=args.asr)
+        s = analyze(audio, out, asr=args.asr, dnn=args.dnn)
     _print(s)
     print(f"\n出力: {out}/  (report.json, frames.csv, *.png, speech.wav, environment.wav)")
 

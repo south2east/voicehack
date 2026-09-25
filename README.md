@@ -7,7 +7,7 @@
 | スペクトル表示 | `spectrum.png` (原音 / 音声 / 環境音を重ね描き, 主要ピーク注記) | Welch 1967 (平均ピリオドグラム), Harris 1978 (Hann 窓) |
 | スペクトログラム表示 | `spectrogram.png` (線形周波数 + メル 80 帯域, F0 重ね描き) | Allen 1977 (STFT/OLA), O'Shaughnessy 1987 (mel 尺度) |
 | 周波数・大きさの数値化 | `report.json` / `frames.csv` (フレーム毎) | 主要ピーク (放物線補間), オクターブバンド (IEC 61260), スペクトル重心 / 広がり / rolloff / 平坦度 (Peeters 2004, Johnston 1988) |
-| ノイズ分離 (環境音だけ取り出す) | `speech.wav`, `environment.wav`, `separation.png` | MCRA 雑音推定 (Cohen & Berdugo 2002) + MMSE-LSA (Ephraim & Malah 1985) + decision-directed 事前 SNR (Ephraim & Malah 1984) + OM-LSA の存在確率ゲート (Cohen & Berdugo 2001) + 周期性による音声区間ゲート (Tucker 1992) |
+| ノイズ分離 (環境音だけ取り出す) | `speech.wav`, `environment.wav`, `separation.png`; `--dnn` で声と重なった物音も分離 | MCRA 雑音推定 (Cohen & Berdugo 2002) + MMSE-LSA (Ephraim & Malah 1985) + decision-directed 事前 SNR (Ephraim & Malah 1984) + OM-LSA の存在確率ゲート (Cohen & Berdugo 2001) + 周期性による音声区間ゲート (Tucker 1992); `--dnn`: SepFormer (Subakan et al. 2021, DNS4 学習済み) を発話単位で適用 |
 | 大きさ | LUFS (integrated / momentary / short-term), LRA, RMS dBFS, peak, crest factor | ITU-R BS.1770-4, EBU Tech 3341 / 3342 |
 | トーン (声の高さ・抑揚) | F0 輪郭, 中央値 (Hz と音名), 5–95% 範囲, 抑揚幅 (半音) | YIN (de Cheveigné & Kawahara 2002) + 話者の声域 (Hirst 2011) と輪郭の連続性による外れ値除去 |
 | スピード | 音節数, 発話速度 / 調音速度 [音節/s], ポーズ数, 変調周波数 [Hz]; `--asr` でモーラ速度 [モーラ/s] と文字起こし | サブバンド相関による音節核検出 (Wang & Narayanan 2007, 主指標), 強度ピーク法 (de Jong & Wempe 2009, 参考), 包絡変調スペクトル (Morgan & Fosler-Lussier 1998, mrate); `--asr`: Whisper (Radford et al. 2023) + UniDic の読みでモーラを数える |
@@ -30,6 +30,8 @@ uv run voicehack analyze voice.wav -o out/test --sr 16000
 uv run voicehack analyze voice.wav --no-separate      # ノイズ分離なし
 uv run voicehack analyze voice.wav --asr              # 音声認識でモーラ速度も (要: uv sync --extra asr,
                                                       #  初回に Whisper small 約 480 MB をダウンロード)
+uv run voicehack analyze voice.wav --dnn              # 声と重なった物音も分離 (要: uv sync --extra dnn,
+                                                      #  torch 等 約 600 MB + 初回にモデル約 110 MB)
 
 # マイクで 5 秒録音して解析
 uv run voicehack record -d 5                          # -> out/recording/
@@ -72,12 +74,12 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 
 ## 既知の限界
 
-- **突発音の分離は「声と重なっていない」場合のみ.** MCRA は定常雑音 (空調・ハムなど) を,
-  周期性ゲートは声から離れた突発音 (机を叩く音・拍手・クリック) を環境音側に回します.
-  声の区間は「有声区間 + そこから音声存在確率が途切れずにつながる区間」なので, 語末の無声化した「す」なども声側に残ります.
-  実録音で, 声から離れた打撃音 10 回すべてで声側に残る割合が 29〜80% → 0.3%, 語末「す」(3.5 kHz 以上) の保持率 82〜100%.
-  一方, **発話と同時に鳴った突発音は分けられません** (机を叩きながら話した例で 39〜99% が声側に残る).
-  これには学習ベースの手法 (例: Conv-TasNet, Luo & Mesgarani 2019 / DeepFilterNet, Schröter et al. 2022) が必要です.
+- **突発音の分離.** 従来法 (既定) は, 声から離れた突発音 (机・拍手・クリック) を周期性ゲートで環境音側に回します
+  (実録音 10 回で声側の残り 29〜80% → 0.3%, 語末「す」の保持 82〜100%). 声と同時に鳴った突発音は分けられません.
+  **`--dnn`** では学習済みの SepFormer を発話ごとに掛けるので, 声と重なった突発音も分けられます
+  (実録音で 37.5% / 98.5% → 6.3% / 7.2%; 合成評価で SI-SDR 13.7 → 18.6 dB). CPU で音声の約 0.5 倍の時間がかかります.
+  SepFormer を長い区間にまとめて掛けると, 大きな突発音を含む録音で一部の発話が消える失敗があったため,
+  発話単位で処理し, 有声フレームの低域で従来法と大きく食い違う発話は従来法の出力に戻す安全網を入れています.
 - 周期的な環境音 (楽器・電子音・他人の声) は「声」と判定されます.
 - 雑音の初期推定は「録音中で最も静かな 20% のフレーム」から取ります. 雑音レベルが大きく変わる場合は, MCRA が 1〜2 秒かけて追従します.
 - **スピードは `--asr` のモーラ速度が最も正確.** 同じ文 × 3 速度の実録音 (`experiments/eval_rate.py`) で,
@@ -112,6 +114,8 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 - Y. Ephraim, D. Malah, IEEE TASSP 32(6), 1984; 33(2), 1985.
 - O. Cappé, IEEE TSAP 2(2), 1994.
 - R. Tucker, IEE Proceedings-I 139(4), 1992.
+- C. Subakan et al., "Attention is all you need in speech separation," ICASSP 2021 (SepFormer).
+- J. Le Roux et al., "SDR – half-baked or well done?," ICASSP 2019 (SI-SDR).
 - N. H. de Jong, T. Wempe, Behavior Research Methods 41(2), 2009.
 - D. Wang, S. S. Narayanan, IEEE TASLP 15(8), 2007.
 - N. Morgan, E. Fosler-Lussier, Proc. ICASSP, 1998.
