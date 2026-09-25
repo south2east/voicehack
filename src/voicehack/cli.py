@@ -57,6 +57,8 @@ def main(argv: list[str] | None = None) -> None:
     a.add_argument("--no-separate", action="store_true", help="ノイズ分離をしない")
     a.add_argument("--dnn", action="store_true",
                    help="深層学習 (SepFormer) で声と重なった物音も分離 (要: uv sync --extra dnn)")
+    a.add_argument("--keep-far-voices", action="store_true",
+                   help="遠くの小さな声 (TV・周りの人) も声として残す (既定: 最大の発話より 15 dB 以上小さい声は環境音)")
     a.add_argument("--asr", action="store_true",
                    help="音声認識でモーラ速度を測る (要: uv sync --extra asr)")
 
@@ -71,7 +73,8 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "analyze":
         audio = load(args.input, sr=args.sr)
         out = args.out or f"out/{Path(args.input).stem}"
-        s = analyze(audio, out, separate_noise=not args.no_separate, asr=args.asr, dnn=args.dnn)
+        s = analyze(audio, out, separate_noise=not args.no_separate, asr=args.asr, dnn=args.dnn,
+                    near_field_db=None if args.keep_far_voices else 15.0)
     else:
         audio = record(args.duration, args.sr)
         out = args.out

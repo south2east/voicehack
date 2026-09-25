@@ -146,8 +146,25 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
     return list(zip(np.nonzero(e == 1)[0], np.nonzero(e == -1)[0]))
 
 
+def near_field_filter(region: np.ndarray, power: np.ndarray, within_db: float) -> np.ndarray:
+    """声の区間のうち, 最も大きい区間より within_db 以上小さい区間を落とす.
+    マイクの近くで話す本人の声に比べ, 遠くの TV・周りの人の声は小さく入るという前提.
+    実録音で本人の発話は最大から 0〜-10 dB, TV の声の区間は -23 dB."""
+    runs = _runs(region > 0.5)
+    if not runs:
+        return region
+    lv = [10 * np.log10(np.mean(power[a:b]) + 1e-20) for a, b in runs]
+    top = max(lv)
+    out = region.copy()
+    for (a, b), l in zip(runs, lv):
+        if l < top - within_db:
+            out[a:b] = 0.0
+    return out
+
+
 def separate(x: np.ndarray, sr: int, g_min_db: float = -25.0,
-             presence_gate: bool = True, voicing_gate: bool = True) -> Separation:
+             presence_gate: bool = True, voicing_gate: bool = True,
+             near_field_db: float | None = 15.0) -> Separation:
     S = stft(x, sr, win_s=0.032, hop_ratio=0.25)
     hop_s = S.sft.hop / sr
     P = S.power
@@ -165,6 +182,8 @@ def separate(x: np.ndarray, sr: int, g_min_db: float = -25.0,
     if voicing_gate:
         # 周期性ゲート (Tucker 1992): 声の区間の外は G_min へ
         region = voice_region(S.inverse(G * S.X), sr, S.t, ps.mean(axis=0))
+        if near_field_db is not None:
+            region = near_field_filter(region, (G ** 2 * P).sum(axis=0), near_field_db)
         G = gmin + (G - gmin) * region[None, :]
     speech = S.inverse(G * S.X)
     env = S.inverse((1 - G) * S.X)

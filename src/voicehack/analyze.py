@@ -18,13 +18,14 @@ from .spectral import octave_bands, spectral_features, spectrum, stft
 
 
 def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
-            asr: bool = False, dnn: bool = False) -> dict:
+            asr: bool = False, dnn: bool = False,
+            near_field_db: float | None = 15.0) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     x, sr = audio.x, audio.sr
 
     # --- ノイズ分離: 韻律 (トーン/スピード) は分離後の音声で測る
-    sep = separate(x, sr) if separate_noise else None
+    sep = separate(x, sr, near_field_db=near_field_db) if separate_noise else None
     if sep is not None and dnn:
         # 声と重なった突発音も分ける: SepFormer の音声推定 + 周期性ゲート
         from .dnn import enhance_checked, gate_by_voice_region

@@ -215,3 +215,20 @@ def test_cli_analyze_end_to_end(tmp_path):
     np.testing.assert_allclose(sp + en, x, atol=1e-5)
     w = slice(k0, k0 + 800)                       # 声から離れた突発音は環境音側へ
     assert np.sum(sp[w] ** 2) < 0.05 * np.sum(x[w] ** 2)
+
+
+def test_near_field_filter_drops_far_quiet_voice():
+    """最大の発話より 15 dB 以上小さい有声区間 (遠くの TV など) は環境音側に回す."""
+    t = np.arange(4 * SR) / SR
+    ph = 2 * np.pi * np.cumsum(150 + 20 * np.sin(2 * np.pi * t)) / SR
+    voice = sum(np.sin(k * ph) / k for k in range(1, 12))
+    main = 0.3 * voice * ((t > 0.5) & (t < 1.3))
+    far = 0.015 * voice * ((t > 2.5) & (t < 3.3))      # -26 dB
+    x = main + far + 0.0005 * np.random.default_rng(8).standard_normal(len(t))
+    near = slice(int(0.7 * SR), int(1.1 * SR))
+    fars = slice(int(2.7 * SR), int(3.1 * SR))
+    on = separate(x, SR)
+    off = separate(x, SR, near_field_db=None)
+    assert np.sum(on.speech[near] ** 2) > 0.8 * np.sum(x[near] ** 2)
+    assert np.sum(off.speech[fars] ** 2) > 0.5 * np.sum(x[fars] ** 2)   # 無効なら残る
+    assert np.sum(on.speech[fars] ** 2) < 0.01 * np.sum(x[fars] ** 2)   # 有効なら落ちる
