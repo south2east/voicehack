@@ -72,7 +72,7 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
     if asr:
         from .asr import mora_rate
 
-        summary["rate"]["asr"] = mora_rate(voice, sr)
+        summary["rate"]["asr"] = mora_rate(voice, sr, asr_input=x)
     if sep is not None:
         summary["separation"] = {
             "method": "SepFormer (DNS4) + voice-region gate" if dnn else

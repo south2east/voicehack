@@ -52,11 +52,11 @@ def load_utterances():
             sp = separate(x, SR).speech
             utt = {}
             for spd, (a, b) in segs.items():
-                seg = sp[int((a - 0.3) * SR): int((b + 0.3) * SR)]
-                utt[spd] = (seg, mora / (b - a))
+                sl = slice(int((a - 0.3) * SR), int((b + 0.3) * SR))
+                utt[spd] = (sp[sl], mora / (b - a), x[sl])
             out[split].append((name, utt))
     for name, files, dur in TTS:
-        out["dev"].append((name, {s: (separate(load(f).x, SR).speech, 1.0 / dur[s])
+        out["dev"].append((name, {s: (separate(load(f).x, SR).speech, 1.0 / dur[s], load(f).x)
                                   for s, f in files.items()}))
     return out
 
@@ -112,8 +112,8 @@ def asr_ratio_errors(utts):
     errs, abs_err = [], []
     for name, utt in utts:
         est = {}
-        for s, (x, true) in utt.items():
-            r = mora_rate(x, SR)
+        for s, (x, true, raw) in utt.items():
+            r = mora_rate(x, SR, asr_input=raw)
             est[s] = r["speech_rate_mora_per_s"] or 0.0
             if name != "tts":
                 abs_err.append(abs(est[s] / true - 1))

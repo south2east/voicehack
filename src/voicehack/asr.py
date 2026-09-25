@@ -11,6 +11,12 @@
 
 Whisper は同じ文の繰り返しをまとめてしまうことがあるため, 0.5 s 以上の
 ポーズで区切った区間ごとに認識する.
+
+区間の検出は分離後の音声で行うが, 認識そのものは元の入力にかける.
+音声強調の歪みは認識を悪化させうる (K. Iwamoto et al., "How bad are artifacts?:
+Analyzing the impact of speech enhancement errors on ASR," Interspeech 2022).
+実録音 (音楽を流しながら話す) でも, 入力では正しく認識された発話が, 従来法・DNN の
+どちらの分離後でも「本屋で」→「方にやれ」と誤認識された.
 """
 
 from __future__ import annotations
@@ -103,15 +109,17 @@ def active_intervals(x: np.ndarray, sr: int, min_pause_s: float = 0.3,
 
 
 def transcribe(x: np.ndarray, sr: int, model: str = "small",
-               split_pause_s: float = 0.5) -> list[Utterance]:
+               split_pause_s: float = 0.5, asr_input: np.ndarray | None = None) -> list[Utterance]:
+    """x (分離後の音声) で発話区間を検出し, asr_input (元の入力; 既定は x) を認識する."""
+    src = x if asr_input is None else asr_input
     if sr != 16000:
         from .audio_io import resample
 
-        x, sr = resample(x, sr, 16000), 16000
+        x, src, sr = resample(x, sr, 16000), resample(src, sr, 16000), 16000
     m = _model(model)
     utts = []
     for a, b in active_intervals(x, sr, min_pause_s=split_pause_s):
-        seg = x[max(0, int((a - 0.2) * sr)): int((b + 0.2) * sr)].astype(np.float32)
+        seg = src[max(0, int((a - 0.2) * sr)): int((b + 0.2) * sr)].astype(np.float32)
         segs, _ = m.transcribe(seg, language="ja", beam_size=5,
                                condition_on_previous_text=False, vad_filter=False)
         text = "".join(s.text for s in segs).strip()
@@ -122,8 +130,9 @@ def transcribe(x: np.ndarray, sr: int, model: str = "small",
     return utts
 
 
-def mora_rate(x: np.ndarray, sr: int, model: str = "small") -> dict:
-    utts = transcribe(x, sr, model)
+def mora_rate(x: np.ndarray, sr: int, model: str = "small",
+              asr_input: np.ndarray | None = None) -> dict:
+    utts = transcribe(x, sr, model, asr_input=asr_input)
     morae = sum(u.morae for u in utts)
     if not utts:
         return {"morae": 0, "speech_rate_mora_per_s": None,
