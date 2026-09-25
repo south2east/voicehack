@@ -43,6 +43,10 @@ def record(seconds: float, sr: int = 16000) -> Audio:
     except ImportError as e:  # pragma: no cover
         raise SystemExit("録音には sounddevice が必要です: uv sync --extra mic") from e
     warm = int(0.3 * sr)  # マイク起動直後の立ち上がり区間は捨てる
+    # 開始合図のビープ (録音前に鳴らし終える)
+    tb = np.arange(int(0.15 * sr)) / sr
+    sd.play(0.3 * np.sin(2 * np.pi * 880 * tb) * np.hanning(len(tb)), sr)
+    sd.wait()
     print(f"録音中… {seconds:.1f} 秒", flush=True)
     x = sd.rec(int(seconds * sr) + warm, samplerate=sr, channels=1, dtype="float64")
     sd.wait()
