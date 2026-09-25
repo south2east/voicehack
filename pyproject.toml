@@ -21,6 +21,11 @@ voicehack = "voicehack.cli:main"
 mic = [
     "sounddevice>=0.5.6",
 ]
+asr = [
+    "faster-whisper>=1.2.1",
+    "fugashi>=1.5.2",
+    "unidic-lite>=1.0.8",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.7,<0.12.0"]

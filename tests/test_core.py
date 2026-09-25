@@ -122,3 +122,17 @@ def test_subband_rate_counts_syllable_train(rate):
     x = 0.2 * np.where(syl == 0, a, i) * am * ((t > 0.5) & (t < 3.5))
     r = subband_rate(x, SR, yin_two_pass(x, SR))
     assert r["speech_rate_syll_per_s"] == pytest.approx(rate, rel=0.15)
+
+
+def test_mora_counting():
+    pytest.importorskip("fugashi")
+    from voicehack.asr import count_morae, to_kana
+
+    cases = {
+        "駅前の本屋で雑誌を買いました": 18,   # っ・ん を 1 モーラと数える
+        "来週の会議は3時に始まります": 19,     # 数字は漢数字に直して読む
+        "毎朝コーヒーを飲みます": 13,          # 長音 ー を 1 モーラ
+        "今日はいい天気です": 10,              # 拗音 きょ は 1 モーラ
+    }
+    for text, n in cases.items():
+        assert count_morae(to_kana(text)) == n, (text, to_kana(text))

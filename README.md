@@ -10,7 +10,7 @@
 | ノイズ分離 (環境音だけ取り出す) | `speech.wav`, `environment.wav`, `separation.png` | MCRA 雑音推定 (Cohen & Berdugo 2002) + MMSE-LSA (Ephraim & Malah 1985) + decision-directed 事前 SNR (Ephraim & Malah 1984) + OM-LSA の存在確率ゲート (Cohen & Berdugo 2001) + 周期性による音声区間ゲート (Tucker 1992) |
 | 大きさ | LUFS (integrated / momentary / short-term), LRA, RMS dBFS, peak, crest factor | ITU-R BS.1770-4, EBU Tech 3341 / 3342 |
 | トーン (声の高さ・抑揚) | F0 輪郭, 中央値 (Hz と音名), 5–95% 範囲, 抑揚幅 (半音) | YIN (de Cheveigné & Kawahara 2002) + 話者音域の 2 パス推定 (Hirst 2011) |
-| スピード | 音節数, 発話速度 / 調音速度 [音節/s], ポーズ数, 変調周波数 [Hz] | サブバンド相関による音節核検出 (Wang & Narayanan 2007, 主指標), 強度ピーク法 (de Jong & Wempe 2009, 参考), 包絡変調スペクトル (Morgan & Fosler-Lussier 1998, mrate) |
+| スピード | 音節数, 発話速度 / 調音速度 [音節/s], ポーズ数, 変調周波数 [Hz]; `--asr` でモーラ速度 [モーラ/s] と文字起こし | サブバンド相関による音節核検出 (Wang & Narayanan 2007, 主指標), 強度ピーク法 (de Jong & Wempe 2009, 参考), 包絡変調スペクトル (Morgan & Fosler-Lussier 1998, mrate); `--asr`: Whisper (Radford et al. 2023) + UniDic の読みでモーラを数える |
 
 大きさ・トーン・スピードは `prosody.png` にまとめて描画されます. トーンとスピードは, 分離した **音声側** の信号で測ります.
 
@@ -28,6 +28,8 @@ uv sync                 # マイク録音も使うなら: uv sync --extra mic
 uv run voicehack analyze path/to/voice.wav            # -> out/voice/
 uv run voicehack analyze voice.wav -o out/test --sr 16000
 uv run voicehack analyze voice.wav --no-separate      # ノイズ分離なし
+uv run voicehack analyze voice.wav --asr              # 音声認識でモーラ速度も (要: uv sync --extra asr,
+                                                      #  初回に Whisper small 約 480 MB をダウンロード)
 
 # マイクで 5 秒録音して解析
 uv run voicehack record -d 5                          # -> out/recording/
@@ -76,7 +78,11 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
   これには学習ベースの手法 (例: Conv-TasNet, Luo & Mesgarani 2019 / DeepFilterNet, Schröter et al. 2022) が必要です.
 - 周期的な環境音 (楽器・電子音・他人の声) は「声」と判定されます.
 - 雑音の初期推定は「録音中で最も静かな 20% のフレーム」から取ります. 雑音レベルが大きく変わる場合は, MCRA が 1〜2 秒かけて追従します.
-- **スピードは比較用の指標.** 同じ文を速さを変えて読んだ音声 5 本で, 推定した速さの比の誤差は
+- **スピードは `--asr` のモーラ速度が最も正確.** 同じ文 × 3 速度の実録音 (`experiments/eval_rate.py`) で,
+  速さの比の誤差は test 3.5% / dev 4.5% (音量包絡の方式は test 24%), モーラ/s の絶対値の誤差は 8% 前後.
+  読みの揺れ (「明日」をアス, 「私」をワタクシと読むなど) で ±1 モーラずれることがあります.
+  認識は Mac 内で完結し, 音声を外部に送りません.
+- **音量包絡によるスピードは比較用の指標.** 同じ文を速さを変えて読んだ音声 5 本で, 推定した速さの比の誤差は
   Wang & Narayanan 法で 6 / 8 / 20% (de Jong 法は 8 / 24 / 25%). ただしパラメータもこの 5 本で選んでいます.
   パラメータ選択に使っていない実録音 (同じ文を 普通 / ゆっくり / 早口) では, 比の誤差は
   普通/ゆっくり 20% (de Jong 33%), 早口/ゆっくり 26% (de Jong 36%), 早口/普通 8% (de Jong 4%).
@@ -106,3 +112,4 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 - N. H. de Jong, T. Wempe, Behavior Research Methods 41(2), 2009.
 - D. Wang, S. S. Narayanan, IEEE TASLP 15(8), 2007.
 - N. Morgan, E. Fosler-Lussier, Proc. ICASSP, 1998.
+- A. Radford et al., "Robust speech recognition via large-scale weak supervision," ICML 2023 (Whisper).

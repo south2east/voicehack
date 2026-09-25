@@ -29,6 +29,12 @@ def _print(s: dict) -> None:
     dj = r["de_jong_2009"]
     print(f"           参考: de Jong 法 {dj['speech_rate_syll_per_s']:.2f} 音節/s, "
           f"変調周波数 {_f(r['modulation_rate_hz'], 2)} Hz")
+    if "asr" in r:
+        a = r["asr"]
+        print(f"[モーラ]   {a['morae']} モーラ, 発話速度 {_f(a['speech_rate_mora_per_s'], 2)} モーラ/s, "
+              f"調音速度 {_f(a['articulation_rate_mora_per_s'], 2)} モーラ/s")
+        for u in a["utterances"]:
+            print(f"           {u['start']:6.2f}-{u['end']:6.2f}s  {u['text']}  ({u['morae']})")
     peaks = ", ".join(f"{pk['freq_hz']:.0f} Hz ({pk['level_dbfs']:.0f} dB)"
                       for pk in s["spectrum"]["dominant_peaks"][:5])
     print(f"[周波数]   主要ピーク: {peaks}")
@@ -49,23 +55,26 @@ def main(argv: list[str] | None = None) -> None:
     a.add_argument("-o", "--out", default=None, help="出力先 (既定: out/<ファイル名>)")
     a.add_argument("--sr", type=int, default=None, help="解析前にリサンプル")
     a.add_argument("--no-separate", action="store_true", help="ノイズ分離をしない")
+    a.add_argument("--asr", action="store_true",
+                   help="音声認識でモーラ速度を測る (要: uv sync --extra asr)")
 
     r = sub.add_parser("record", help="マイク録音して解析")
     r.add_argument("-d", "--duration", type=float, default=5.0)
     r.add_argument("--sr", type=int, default=16000)
     r.add_argument("-o", "--out", default="out/recording")
+    r.add_argument("--asr", action="store_true", help="音声認識でモーラ速度を測る")
 
     args = ap.parse_args(argv)
     if args.cmd == "analyze":
         audio = load(args.input, sr=args.sr)
         out = args.out or f"out/{Path(args.input).stem}"
-        s = analyze(audio, out, separate_noise=not args.no_separate)
+        s = analyze(audio, out, separate_noise=not args.no_separate, asr=args.asr)
     else:
         audio = record(args.duration, args.sr)
         out = args.out
         Path(out).mkdir(parents=True, exist_ok=True)
         save(Path(out) / "input.wav", audio)
-        s = analyze(audio, out)
+        s = analyze(audio, out, asr=args.asr)
     _print(s)
     print(f"\n出力: {out}/  (report.json, frames.csv, *.png, speech.wav, environment.wav)")
 

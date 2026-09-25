@@ -162,7 +162,10 @@ def prosody_plot(x, sr, loud, rms, pitch, rate, wn, summary, path):
     ax.set_title(f"Speed: {rs['syllables']} syllables, "
                  f"speech rate {rs['speech_rate_syll_per_s']:.2f} syll/s, "
                  f"articulation rate {rs['articulation_rate_syll_per_s']:.2f} syll/s"
-                 + (f", modulation {mr:.1f} Hz" if mr else ""))
+                 + (f", modulation {mr:.1f} Hz" if mr else "")
+                 + (f"\nASR: {rs['asr']['morae']} morae, "
+                    f"{rs['asr']['speech_rate_mora_per_s']:.2f} mora/s"
+                    if rs.get("asr") and rs["asr"].get("speech_rate_mora_per_s") else ""))
     ax.set_ylim(wn["threshold_db"] - 15, np.max(wn["envelope_db"]) + 5)
     ax.set_ylabel("dB")
     ax.set_xlabel("Time [s]")

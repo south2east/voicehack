@@ -17,7 +17,8 @@ from .rate import modulation_rate, rate_summary, speech_rate, subband_rate
 from .spectral import octave_bands, spectral_features, spectrum, stft
 
 
-def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True) -> dict:
+def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
+            asr: bool = False) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     x, sr = audio.x, audio.sr
@@ -60,6 +61,10 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True) -> d
         "pitch": pitch_summary(pitch),
         "rate": rate_summary(rate, wn, mrate),
     }
+    if asr:
+        from .asr import mora_rate
+
+        summary["rate"]["asr"] = mora_rate(voice, sr)
     if sep is not None:
         summary["separation"] = {
             "speech": {**level_summary(sep.speech),

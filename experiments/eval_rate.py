@@ -105,6 +105,28 @@ def ratio_errors(utts, pitches, **kw):
     return np.array(errs)
 
 
+def asr_ratio_errors(utts):
+    """音声認識によるモーラ速度 (パラメータ無し: dev/test とも純粋な評価)."""
+    from voicehack.asr import mora_rate
+
+    errs, abs_err = [], []
+    for name, utt in utts:
+        est = {}
+        for s, (x, true) in utt.items():
+            r = mora_rate(x, SR)
+            est[s] = r["speech_rate_mora_per_s"] or 0.0
+            if name != "tts":
+                abs_err.append(abs(est[s] / true - 1))
+            print(f"    {name:8s} {s:6s} {r['morae']:2d} モーラ "
+                  f"{' / '.join(u['text'] for u in r['utterances'])}  "
+                  f"推定 {est[s]:.1f} (正解 {true:.1f})" if name != "tts" else
+                  f"    {name:8s} {s:6s} {r['morae']:2d} モーラ 推定 {est[s]:.1f}/s")
+        for a, b in itertools.combinations(sorted(utt), 2):
+            true = utt[a][1] / utt[b][1]
+            errs.append(abs((est[a] / est[b]) / true - 1) if est[b] > 0 else 1.0)
+    return np.array(errs), np.array(abs_err)
+
+
 def main():
     data = load_utterances()
     pitches = {sp: [{s: yin_two_pass(v[0], SR) for s, v in utt.items()} for _, utt in data[sp]]
@@ -124,6 +146,11 @@ def main():
         t = ratio_errors(data["test"], pitches["test"], **g)
         print(f"{label:6s} dev 平均誤差 {d.mean():.3f} | test 平均誤差 {t.mean():.3f} "
               f"(中央値 {np.median(t):.3f}, 組数 {len(t)})  {g}")
+    for split in ("dev", "test"):
+        print(f"ASR ({split}):")
+        e, a = asr_ratio_errors(data[split])
+        print(f"ASR    {split} 比の平均誤差 {e.mean():.3f} (中央値 {np.median(e):.3f}, 組数 {len(e)})"
+              f" | モーラ/s 絶対値の平均誤差 {a.mean():.3f}")
 
 
 if __name__ == "__main__":
