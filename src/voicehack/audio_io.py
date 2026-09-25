@@ -47,10 +47,14 @@ def record(seconds: float, sr: int = 16000) -> Audio:
     x = sd.rec(int(seconds * sr) + warm, samplerate=sr, channels=1, dtype="float64")
     sd.wait()
     print("録音終了")
-    return Audio(x[warm:, 0], sr)
+    x = x[warm:, 0]
+    peak = np.max(np.abs(x))
+    if peak > 1.0:
+        print(f"警告: 入力が 0 dBFS を超えています (peak {20 * np.log10(peak):+.1f} dBFS). "
+              "マイク入力音量を下げるか音源から離れてください")
+    return Audio(x, sr)
 
 
 def save(path: str | Path, audio: Audio) -> None:
-    peak = np.max(np.abs(audio.x)) if len(audio.x) else 0.0
-    x = audio.x / peak * 0.99 if peak > 1.0 else audio.x
-    sf.write(str(path), x, audio.sr, subtype="PCM_16")
+    """32bit float で保存: 正規化しないので解析値 (dBFS/LUFS) とファイルのレベルが一致する."""
+    sf.write(str(path), audio.x, audio.sr, subtype="FLOAT")
