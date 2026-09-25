@@ -45,19 +45,21 @@ def mcra(P: np.ndarray, hop_s: float, alpha_s: float = 0.8, alpha_p: float = 0.2
     """MCRA 雑音推定 (Cohen & Berdugo 2002, 式 (5)-(13))."""
     n_f, n_t = P.shape
     L = max(2, int(round(window_s / hop_s)))  # 最小値探索窓 (~1 s)
+
+    # 初期値: 全体のうちフレームエネルギー下位 init_q の区間を雑音のみとみなす
+    # (原論文の「先頭は雑音のみ」の仮定は, 冒頭から話し始めると崩れるため).
+    e = P.sum(axis=0)
+    ok = e > np.median(e) * 1e-4          # デジタル無音 (マイク起動直後・ドロップアウト)
+    cand = np.nonzero(ok)[0] if ok.any() else np.arange(n_t)
+    init = cand[e[cand] <= np.quantile(e[cand], init_q)]
+    lam = P[:, init].mean(axis=1)
+    # デジタル無音フレームは欠損扱いで初期雑音に置換: そのまま通すと S が急落し,
+    # Smin が最大 2 窓 (≈2 s) 過小なまま残って p≈1 に張り付く
+    P = np.where(ok[None, :], P, lam[:, None])
+
     # 周波数方向平滑 b = [0.25, 0.5, 0.25] (w = 1)
     Pf = P.copy()
     Pf[1:-1] = 0.25 * P[:-2] + 0.5 * P[1:-1] + 0.25 * P[2:]
-
-    # 初期値: 全体のうちフレームエネルギー下位 init_q の区間を雑音のみとみなす.
-    # (「先頭は雑音のみ」の仮定だと, 冒頭から話す場合やマイク起動直後の
-    #  ほぼ無音のフレームで Smin が過小になり p≈1 に張り付く)
-    e = P.sum(axis=0)
-    ok = e > np.median(e) * 1e-4          # デジタル無音に近いフレームを除外
-    cand = np.nonzero(ok)[0] if ok.any() else np.arange(n_t)
-    q = np.quantile(e[cand], init_q)
-    init = cand[e[cand] <= q]
-    lam = P[:, init].mean(axis=1)
     S = Pf[:, init].mean(axis=1)
     Smin = S.copy()
     Stmp = S.copy()

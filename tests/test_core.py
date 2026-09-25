@@ -79,3 +79,12 @@ def test_separation_improves_snr_and_is_additive():
     assert gain_db > 5.0, gain_db
     # 環境音側は雑音に近い
     assert _snr(noise, sep.environment) > _snr(noise, y)
+
+
+def test_leading_digital_silence_does_not_stick_speech_presence():
+    # マイク起動直後の無音 0.15 s + 定常雑音 3 s (音声なし) -> 音声存在確率は低いはず
+    rng = np.random.default_rng(3)
+    y = np.concatenate([np.zeros(int(0.15 * SR)), 0.05 * rng.standard_normal(3 * SR)])
+    sep = separate(y, SR)
+    t = sep.S.t
+    assert sep.speech_prob.mean(axis=0)[(t > 0.3) & (t < 2.0)].mean() < 0.2
