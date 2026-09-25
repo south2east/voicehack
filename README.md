@@ -26,7 +26,7 @@ cp .env.example .env
 | --- | --- |
 | `GOOGLE_APPLICATION_CREDENTIALS` | サービスアカウントキー(JSON)へのパス |
 | `GOOGLE_CLOUD_PROJECT` | GCPプロジェクトID |
-| `GOOGLE_CLOUD_LOCATION` | Speech-to-Text の実行リージョン (例: `us-central1`)。Chirp 3 はリージョン限定なので `global` ではなく明示的に指定 |
+| `GOOGLE_CLOUD_LOCATION` | Speech-to-Text の実行リージョン。Chirp 3 のストリーミングは `us` / `eu` マルチリージョンのみ GA (既定 `us`) |
 | `SPEECH_MODEL` | 認識モデル。既定値は `chirp_3`。使えない場合は `chirp_2` / `chirp` / `latest_long` にフォールバック |
 | `SPEECH_LANGUAGE` | 認識言語 (既定 `ja-JP`) |
 | `PORT` | サーバーのポート (既定 `3000`) |

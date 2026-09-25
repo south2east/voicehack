@@ -70,7 +70,9 @@ class TranscriptionSession {
     this.startedAt = new Date().toISOString();
     this.endedAt = null;
     this.segments = []; // { text, isFinal, confidence, receivedAt }
-    this.client = new speech.SpeechClient();
+    this.client = new speech.SpeechClient(
+      LOCATION === 'global' ? {} : { apiEndpoint: `${LOCATION}-speech.googleapis.com` }
+    );
     this.geminiStream = null;
     this.restartTimer = null;
     this.closed = false;
