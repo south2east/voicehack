@@ -12,7 +12,7 @@ from . import plots
 from .audio_io import Audio, save
 from .denoise import separate
 from .loudness import level_summary, loudness, rms_db
-from .pitch import pitch_summary, yin
+from .pitch import pitch_summary, yin_two_pass
 from .rate import speech_rate
 from .spectral import octave_bands, spectral_features, spectrum, stft
 
@@ -38,7 +38,7 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True) -> d
     # --- 大きさ / トーン / スピード
     loud = loudness(x, sr)
     rms = rms_db(x, sr)
-    pitch = yin(voice, sr)
+    pitch = yin_two_pass(voice, sr)
     rate = speech_rate(voice, sr, pitch)
 
     active = rms[1] > (np.max(rms[1]) - 40)  # 無音フレームを除いて特徴量の統計を取る

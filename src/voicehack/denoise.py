@@ -41,7 +41,7 @@ class Separation:
 
 def mcra(P: np.ndarray, hop_s: float, alpha_s: float = 0.8, alpha_p: float = 0.2,
          alpha_d: float = 0.95, delta: float = 5.0, window_s: float = 1.0,
-         init_s: float = 0.25) -> tuple[np.ndarray, np.ndarray]:
+         init_q: float = 0.2) -> tuple[np.ndarray, np.ndarray]:
     """MCRA 雑音推定 (Cohen & Berdugo 2002, 式 (5)-(13))."""
     n_f, n_t = P.shape
     L = max(2, int(round(window_s / hop_s)))  # 最小値探索窓 (~1 s)
@@ -49,11 +49,16 @@ def mcra(P: np.ndarray, hop_s: float, alpha_s: float = 0.8, alpha_p: float = 0.2
     Pf = P.copy()
     Pf[1:-1] = 0.25 * P[:-2] + 0.5 * P[1:-1] + 0.25 * P[2:]
 
-    # 初期値: 先頭 init_s 秒を雑音のみと仮定 (STFT 先頭のゼロ詰めフレームで
-    # Smin が過小になり p≈1 に張り付くのを防ぐため S/Smin も同じ区間平均で初期化)
-    n_init = max(1, min(n_t, int(init_s / hop_s)))
-    lam = P[:, :n_init].mean(axis=1)
-    S = Pf[:, :n_init].mean(axis=1)
+    # 初期値: 全体のうちフレームエネルギー下位 init_q の区間を雑音のみとみなす.
+    # (「先頭は雑音のみ」の仮定だと, 冒頭から話す場合やマイク起動直後の
+    #  ほぼ無音のフレームで Smin が過小になり p≈1 に張り付く)
+    e = P.sum(axis=0)
+    ok = e > np.median(e) * 1e-4          # デジタル無音に近いフレームを除外
+    cand = np.nonzero(ok)[0] if ok.any() else np.arange(n_t)
+    q = np.quantile(e[cand], init_q)
+    init = cand[e[cand] <= q]
+    lam = P[:, init].mean(axis=1)
+    S = Pf[:, init].mean(axis=1)
     Smin = S.copy()
     Stmp = S.copy()
     p = np.zeros(n_f)
