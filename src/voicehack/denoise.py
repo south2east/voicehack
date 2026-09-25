@@ -18,7 +18,8 @@
    IEE Proceedings-I, 139(4), 377-380, 1992.
    MCRA は定常雑音しか雑音とみなさないため, 机を叩く音・拍手などの突発音は
    「音声」側に残る. そこで音声推定から YIN で有声区間を求め, その前後
-   (子音・無声化母音ぶん) を広げた区間の外ではゲインを G_min に落とす.
+   のうち音声存在確率が途切れずにつながる区間 (子音・無声化母音を含む) の外では
+   ゲインを G_min に落とす.
    声と時間的に重なった突発音はこの方法では分けられない.
 
 環境音は STFT 領域の残差 E = Y - Ŝ = (1 - G) Y として得る. よって
@@ -110,31 +111,39 @@ def mmse_lsa(P: np.ndarray, lam: np.ndarray, alpha: float = 0.98,
     return G
 
 
-def voice_region(x: np.ndarray, sr: int, t_frames: np.ndarray, pre_s: float = 0.2,
-                 post_s: float = 0.25, min_voiced_s: float = 0.05,
+def voice_region(x: np.ndarray, sr: int, t_frames: np.ndarray, presence: np.ndarray,
+                 pad_s: float = 0.1, min_voiced_s: float = 0.05, active_thr: float = 0.5,
                  ramp_s: float = 0.03) -> np.ndarray:
-    """有声区間を前 pre_s / 後 post_s 秒広げた「声の区間」を STFT フレーム上で返す.
+    """「声の区間」を STFT フレーム上で [0, 1] で返す.
 
-    pre_s: 母音に先行する子音 (摩擦音・破裂音) ぶん.
-    post_s: 語末の無声化母音 (「です」の「す」など) ぶん.
-    min_voiced_s 未満の孤立した有声判定 (机の共鳴など) は捨てる.
+    有声区間 (YIN, min_voiced_s 未満の孤立判定は机の共鳴などとして除去) を核に,
+    MCRA の音声存在確率 (帯域平均) が active_thr を超えて途切れずにつながる区間
+    全体を声とみなす. 子音や語末の無声化母音 (「です」の「す」) は母音と
+    つながっているので残り, 無音を挟んだ突発音は外れる. pad_s は安全余白.
     """
     p = yin_two_pass(x, sr)
     v = p.voiced.copy()
     hop = float(p.t[1] - p.t[0]) if len(p.t) > 1 else 0.01
-    # 短い有声ランを除去
-    edges = np.diff(np.concatenate([[0], v.astype(int), [0]]))
-    for a, b in zip(np.nonzero(edges == 1)[0], np.nonzero(edges == -1)[0]):
+    for a, b in _runs(v):
         if (b - a) * hop < min_voiced_s:
             v[a:b] = False
-    # 区間 [i - post, i + pre] に有声フレームがあれば声の区間
-    pre, post = int(round(pre_s / hop)), int(round(post_s / hop))
-    cs = np.concatenate([[0], np.cumsum(v)])
-    idx = np.arange(len(v))
-    region = (cs[np.minimum(len(v), idx + pre + 1)] - cs[np.maximum(0, idx - post)]) > 0
-    # 境界のクリック音を避けるため短い ramp で平滑
-    soft = uniform_filter1d(region.astype(float), size=max(1, int(round(ramp_s / hop))))
-    return np.interp(t_frames, p.t, soft, left=0.0, right=0.0)
+    # フレーム格子を STFT に合わせる
+    vf = np.interp(t_frames, p.t, v.astype(float), left=0.0, right=0.0) > 0.5
+    fhop = float(t_frames[1] - t_frames[0]) if len(t_frames) > 1 else hop
+    pad = int(round(pad_s / fhop))
+    cs = np.concatenate([[0], np.cumsum(vf)])
+    idx = np.arange(len(vf))
+    region = (cs[np.minimum(len(vf), idx + pad + 1)] - cs[np.maximum(0, idx - pad)]) > 0
+    active = presence > active_thr
+    for a, b in _runs(active):
+        if vf[a:b].any():
+            region[a:b] = True
+    return uniform_filter1d(region.astype(float), size=max(1, int(round(ramp_s / fhop))))
+
+
+def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    e = np.diff(np.concatenate([[0], mask.astype(int), [0]]))
+    return list(zip(np.nonzero(e == 1)[0], np.nonzero(e == -1)[0]))
 
 
 def separate(x: np.ndarray, sr: int, g_min_db: float = -25.0,
@@ -150,10 +159,12 @@ def separate(x: np.ndarray, sr: int, g_min_db: float = -25.0,
         # p は時間方向に軽く平滑 (≈50 ms) してから使う
         ps = uniform_filter1d(p, size=max(1, int(0.05 / hop_s)), axis=1)
         G = np.maximum(G, gmin) ** ps * gmin ** (1 - ps)
+    else:
+        ps = uniform_filter1d(p, size=max(1, int(0.05 / hop_s)), axis=1)
     region = None
     if voicing_gate:
         # 周期性ゲート (Tucker 1992): 声の区間の外は G_min へ
-        region = voice_region(S.inverse(G * S.X), sr, S.t)
+        region = voice_region(S.inverse(G * S.X), sr, S.t, ps.mean(axis=0))
         G = gmin + (G - gmin) * region[None, :]
     speech = S.inverse(G * S.X)
     env = S.inverse((1 - G) * S.X)
