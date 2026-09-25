@@ -10,7 +10,7 @@
 | ノイズ分離 (環境音だけ取り出す) | `speech.wav`, `environment.wav`, `separation.png` | MCRA 雑音推定 (Cohen & Berdugo 2002) + MMSE-LSA (Ephraim & Malah 1985) + decision-directed 事前 SNR (Ephraim & Malah 1984) + OM-LSA の存在確率ゲート (Cohen & Berdugo 2001) + 周期性による音声区間ゲート (Tucker 1992) |
 | 大きさ | LUFS (integrated / momentary / short-term), LRA, RMS dBFS, peak, crest factor | ITU-R BS.1770-4, EBU Tech 3341 / 3342 |
 | トーン (声の高さ・抑揚) | F0 輪郭, 中央値 (Hz と音名), 5–95% 範囲, 抑揚幅 (半音) | YIN (de Cheveigné & Kawahara 2002) + 話者音域の 2 パス推定 (Hirst 2011) |
-| スピード | 音節数, 発話速度 / 調音速度 [音節/s], ポーズ数 | 音節核検出 (de Jong & Wempe 2009) |
+| スピード | 音節数, 発話速度 / 調音速度 [音節/s], ポーズ数, 変調周波数 [Hz] | サブバンド相関による音節核検出 (Wang & Narayanan 2007, 主指標), 強度ピーク法 (de Jong & Wempe 2009, 参考), 包絡変調スペクトル (Morgan & Fosler-Lussier 1998, mrate) |
 
 大きさ・トーン・スピードは `prosody.png` にまとめて描画されます. トーンとスピードは, 分離した **音声側** の信号で測ります.
 
@@ -76,10 +76,12 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
   これには学習ベースの手法 (例: Conv-TasNet, Luo & Mesgarani 2019 / DeepFilterNet, Schröter et al. 2022) が必要です.
 - 周期的な環境音 (楽器・電子音・他人の声) は「声」と判定されます.
 - 雑音の初期推定は「録音中で最も静かな 20% のフレーム」から取ります. 雑音レベルが大きく変わる場合は, MCRA が 1〜2 秒かけて追従します.
-- 音節核検出は音節数を少なめに数える傾向があります (原論文も絶対数ではなく人手計数との相関で評価).
-  速度の **比較** には向いていますが, 絶対値の目安にとどめてください. 日本語のモーラ数とは一致しません.
-- 発話速度は録音全長ではなく「最初〜最後の音節核」の区間で割っています
-  (原論文は全長. `speech_rate_total_syll_per_s` に原論文の定義の値も出力).
+- **スピードは比較用の指標.** 同じ文を速さを変えて読んだ音声 5 本で, 推定した速さの比の誤差は
+  Wang & Narayanan 法で 6 / 8 / 20% (de Jong 法は 8 / 24 / 25%). ただしパラメータもこの 5 本で選んでいます.
+  絶対値は音節を少なめに数えるため実際より低く出ます (日本語のモーラ数とも一致しません).
+  伸ばした母音 (「あー」) は抑揚の揺れで複数の音節に数えられることがあります.
+  変調周波数 (mrate) は音節を数えない補助指標ですが, 速さの違いに対する感度は低めです.
+- 発話速度は録音全長ではなく「最初〜最後の音節核」の区間で割っています.
 
 ## 参考文献
 
@@ -96,3 +98,5 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 - O. Cappé, IEEE TSAP 2(2), 1994.
 - R. Tucker, IEE Proceedings-I 139(4), 1992.
 - N. H. de Jong, T. Wempe, Behavior Research Methods 41(2), 2009.
+- D. Wang, S. S. Narayanan, IEEE TASLP 15(8), 2007.
+- N. Morgan, E. Fosler-Lussier, Proc. ICASSP, 1998.

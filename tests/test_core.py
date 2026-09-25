@@ -106,3 +106,19 @@ def test_voicing_gate_moves_isolated_knock_to_environment():
     assert np.sum(sep.speech[w] ** 2) / np.sum(y[w] ** 2) < 0.05
     v = slice(int(1.1 * SR), int(1.4 * SR))
     assert np.sum(sep.speech[v] ** 2) / np.sum(y[v] ** 2) > 0.8
+
+
+@pytest.mark.parametrize("rate", [3.0, 6.0])
+def test_subband_rate_counts_syllable_train(rate):
+    from voicehack.pitch import yin_two_pass
+    from voicehack.rate import subband_rate
+    # 母音 /a/ と /i/ 相当のフォルマントを交互に持つ音節列 (谷は -12 dB 程度まで)
+    t = np.arange(int(4 * SR)) / SR
+    ph = 2 * np.pi * np.cumsum(140 + 10 * np.sin(2 * np.pi * 0.5 * t)) / SR
+    a = sum(np.sin(k * ph) * (1.5 if 5 <= k <= 6 else 0.4) / k for k in range(1, 30))
+    i = sum(np.sin(k * ph) * (1.5 if k in (2, 16, 17) else 0.4) / k for k in range(1, 30))
+    syl = np.floor(t * rate).astype(int) % 2
+    am = 0.25 + 0.75 * np.sin(np.pi * (t * rate % 1.0)) ** 2
+    x = 0.2 * np.where(syl == 0, a, i) * am * ((t > 0.5) & (t < 3.5))
+    r = subband_rate(x, SR, yin_two_pass(x, SR))
+    assert r["speech_rate_syll_per_s"] == pytest.approx(rate, rel=0.15)

@@ -112,7 +112,7 @@ def separation_plot(sep, sr, path):
     plt.close(fig)
 
 
-def prosody_plot(x, sr, loud, rms, pitch, rate, summary, path):
+def prosody_plot(x, sr, loud, rms, pitch, rate, wn, summary, path):
     fig, axes = plt.subplots(4, 1, figsize=(11, 11), sharex=True,
                              gridspec_kw={"height_ratios": [1, 1.3, 1.3, 1.3]})
     t = np.arange(len(x)) / sr
@@ -148,19 +148,22 @@ def prosody_plot(x, sr, loud, rms, pitch, rate, summary, path):
     ax.legend(loc="upper left")
 
     ax = axes[3]
-    ax.plot(rate.t, rate.intensity_db, color=SERIES["original"], lw=1.0, label="intensity [dB]")
-    ax.axhline(rate.threshold_db, color=INK2, lw=1, ls=":")
+    ax.plot(wn["t"], wn["envelope_db"], color=SERIES["original"], lw=1.0,
+            label="syllabic envelope (subband correlation) [dB]")
+    ax.axhline(wn["threshold_db"], color=INK2, lw=1, ls=":")
     for a, b in rate.pauses:
         ax.axvspan(a, b, color=GRID, alpha=0.6, lw=0)
-    if len(rate.nuclei_t):
-        yi = np.interp(rate.nuclei_t, rate.t, rate.intensity_db)
-        ax.plot(rate.nuclei_t, yi, "o", ms=6, color=SERIES["speech"], mec=SURFACE, mew=1.5,
+    if len(wn["nuclei_t"]):
+        yi = np.interp(wn["nuclei_t"], wn["t"], wn["envelope_db"])
+        ax.plot(wn["nuclei_t"], yi, "o", ms=6, color=SERIES["speech"], mec=SURFACE, mew=1.5,
                 label="syllable nuclei")
     rs = summary["rate"]
+    mr = rs.get("modulation_rate_hz")
     ax.set_title(f"Speed: {rs['syllables']} syllables, "
                  f"speech rate {rs['speech_rate_syll_per_s']:.2f} syll/s, "
-                 f"articulation rate {rs['articulation_rate_syll_per_s']:.2f} syll/s")
-    ax.set_ylim(rate.threshold_db - 15, np.max(rate.intensity_db) + 5)
+                 f"articulation rate {rs['articulation_rate_syll_per_s']:.2f} syll/s"
+                 + (f", modulation {mr:.1f} Hz" if mr else ""))
+    ax.set_ylim(wn["threshold_db"] - 15, np.max(wn["envelope_db"]) + 5)
     ax.set_ylabel("dB")
     ax.set_xlabel("Time [s]")
     ax.legend(loc="lower left")

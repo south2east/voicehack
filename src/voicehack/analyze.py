@@ -13,7 +13,7 @@ from .audio_io import Audio, save
 from .denoise import separate
 from .loudness import level_summary, loudness, rms_db
 from .pitch import pitch_summary, yin_two_pass
-from .rate import speech_rate
+from .rate import modulation_rate, rate_summary, speech_rate, subband_rate
 from .spectral import octave_bands, spectral_features, spectrum, stft
 
 
@@ -40,6 +40,9 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True) -> d
     rms = rms_db(x, sr)
     pitch = yin_two_pass(voice, sr)
     rate = speech_rate(voice, sr, pitch)
+    wn = subband_rate(voice, sr, pitch)
+    region = sep.voice_region if sep is not None else None
+    mrate = modulation_rate(voice, sr, active=None if region is None else region > 0.5)
 
     active = rms[1] > (np.max(rms[1]) - 40)  # 無音フレームを除いて特徴量の統計を取る
     act_S = np.interp(S.t, rms[0], active.astype(float)) > 0.5
@@ -55,7 +58,7 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True) -> d
                for k, v in feats.items()},
         },
         "pitch": pitch_summary(pitch),
-        "rate": rate.summary,
+        "rate": rate_summary(rate, wn, mrate),
     }
     if sep is not None:
         summary["separation"] = {
@@ -75,7 +78,7 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True) -> d
     _frames_csv(out / "frames.csv", S, feats, rms, loud, pitch, sep)
     plots.spectrum_plot(specs, out / "spectrum.png")
     plots.spectrogram_plot(S, sr, out / "spectrogram.png", pitch=pitch)
-    plots.prosody_plot(x, sr, loud, rms, pitch, rate, summary, out / "prosody.png")
+    plots.prosody_plot(x, sr, loud, rms, pitch, rate, wn, summary, out / "prosody.png")
     if sep is not None:
         plots.separation_plot(sep, sr, out / "separation.png")
     return summary

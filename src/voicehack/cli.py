@@ -26,6 +26,9 @@ def _print(s: dict) -> None:
         print("[トーン]   有声区間なし")
     print(f"[スピード] {r['syllables']} 音節, 発話速度 {r['speech_rate_syll_per_s']:.2f} 音節/s, "
           f"調音速度 {r['articulation_rate_syll_per_s']:.2f} 音節/s, ポーズ {r['n_pauses']} 回")
+    dj = r["de_jong_2009"]
+    print(f"           参考: de Jong 法 {dj['speech_rate_syll_per_s']:.2f} 音節/s, "
+          f"変調周波数 {_f(r['modulation_rate_hz'], 2)} Hz")
     peaks = ", ".join(f"{pk['freq_hz']:.0f} Hz ({pk['level_dbfs']:.0f} dB)"
                       for pk in s["spectrum"]["dominant_peaks"][:5])
     print(f"[周波数]   主要ピーク: {peaks}")
