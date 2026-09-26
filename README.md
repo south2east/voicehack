@@ -4,13 +4,13 @@
 
 メインのアプリは **[Comida caseira](#3-comida-caseira-vercel-版)** です。計量せず感覚で料理するお母さんが、
 作りながら話すだけでレシピになり、「さーーっと」のような擬音の分量を声の伸ばし方から推定して確かめ、
-離れて暮らす家族が一覧で見て質問できます。**https://okaasan-recipe.vercel.app**
+離れて暮らす家族が一覧で見て質問できます。**https://comida-caseira-recipe.vercel.app**
 
 | 構成 | 言語 | 場所 | 概要 |
 |---|---|---|---|
 | [1. リアルタイム文字起こしアプリ](#1-リアルタイム文字起こしアプリ-nodejs) | Node.js | `server.js`, `public/` | ブラウザのマイク入力を Google Cloud Speech-to-Text (Chirp 3) でストリーミング文字起こし. 録音を保存し, 終了後に 2. の解析ツールへ自動で渡す |
 | [2. 音声解析ツール](#2-音声解析ツール-python) | Python | `src/voicehack/`, `experiments/`, `tests/` | スペクトル・大きさ (LUFS)・声の高さ・話す速さの計測, 声と環境音の分離 |
-| [3. Comida caseira (Vercel 版)](#3-comida-caseira-vercel-版) | Node.js | `web/` | 料理しながら話した声をレシピにまとめ、家族と共有する Web アプリ。https://okaasan-recipe.vercel.app |
+| [3. Comida caseira (Vercel 版)](#3-comida-caseira-vercel-版) | Node.js | `web/` | 料理しながら話した声をレシピにまとめ、家族と共有する Web アプリ。https://comida-caseira-recipe.vercel.app |
 | 調査ノート | — | `research_notes/`, `reports/` | 録音データのノイズ除去手法の調査 |
 
 1. と 2. の設定はリポジトリ直下の **`.env`** (ひな形: `.env.example`) から読みます. `.env` は git 管理外です.
@@ -352,8 +352,8 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 確かめた量は**この家の分量の辞書**として次のレシピに生かします。完成したレシピは離れて暮らす家族が一覧で見て、
 わからないところをお母さんに質問できます。
 
-- 聞き取り (お母さん): https://okaasan-recipe.vercel.app
-- レシピ一覧 (家族): https://okaasan-recipe.vercel.app/book/
+- 聞き取り (お母さん): https://comida-caseira-recipe.vercel.app
+- レシピ一覧 (家族): https://comida-caseira-recipe.vercel.app/book/
 
 ### 使い方
 
