@@ -241,3 +241,33 @@ body {
   grid-column: 1 / -1;
   margin: 0;
 }
+
+.dictionary {
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.dictionary h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.dict-sub {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.dict-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dict-list li {
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}

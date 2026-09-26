@@ -13,7 +13,8 @@
 class ProsodyMeter {
   constructor(frameMs) {
     this.frameMs = frameMs;
-    this.fluxAvg = null; // セッション全体での、声のフレーム間の音色変化の平均
+    this.fluxAvg = null; // セッション全体での、声のフレーム間の音色変化の平均 (伸ばし中は更新しない)
+    this.maxGap = Math.round(150 / frameMs); // 伸ばしの途中で許す途切れ (声の揺れ・息継ぎ未満)
     this.reset();
   }
 
@@ -21,9 +22,9 @@ class ProsodyMeter {
   reset() {
     this.dbs = [];
     this.prevDb = null;
-    this.prevSpec = null;
+    this.prevBands = null;
     this.run = 0; // 今続いている「伸ばし」のフレーム数
-    this.miss = 0; // 伸ばし中に基準を外れた連続フレーム数 (1 フレームだけなら許す)
+    this.miss = 0; // 伸ばし中に基準を外れた連続フレーム数
     this.maxRun = 0;
   }
 
@@ -32,27 +33,30 @@ class ProsodyMeter {
     if (!voiced) {
       this._endRun();
       this.prevDb = null;
-      this.prevSpec = null;
+      this.prevBands = null;
       return;
     }
     this.dbs.push(db);
+    const bands = bandLevels(spec);
 
-    if (this.prevSpec) {
-      const flux = spectralFlux(this.prevSpec, spec);
-      this.fluxAvg = this.fluxAvg === null ? flux : this.fluxAvg * 0.98 + flux * 0.02;
-      const steady = Math.abs(db - this.prevDb) < 3 && flux < this.fluxAvg * 0.7;
+    if (this.prevBands) {
+      const flux = bandFlux(this.prevBands, bands);
+      if (this.fluxAvg === null) this.fluxAvg = flux;
+      // 伸ばしの間に基準を更新すると、長く伸ばすほど基準が下がって途中で切れてしまう
+      if (this.run === 0) this.fluxAvg = this.fluxAvg * 0.97 + flux * 0.03;
+      const steady = Math.abs(db - this.prevDb) < 4 && flux < this.fluxAvg * 0.75;
       if (steady) {
         this.run += 1 + this.miss;
         this.miss = 0;
         this.maxRun = Math.max(this.maxRun, this.run);
-      } else if (this.run > 0 && this.miss === 0) {
-        this.miss = 1;
+      } else if (this.run > 0 && this.miss < this.maxGap) {
+        this.miss += 1;
       } else {
         this._endRun();
       }
     }
     this.prevDb = db;
-    this.prevSpec = spec.slice();
+    this.prevBands = bands;
   }
 
   _endRun() {
@@ -75,17 +79,30 @@ class ProsodyMeter {
   }
 }
 
-// 声の帯域 (約 70Hz〜4kHz) で、隣り合うフレームのスペクトルの変化量 (dB の平均絶対差)
-function spectralFlux(a, b) {
-  const lo = 3;
-  const hi = Math.min(a.length, 175);
-  let sum = 0;
-  for (let i = lo; i < hi; i++) {
-    const x = Number.isFinite(a[i]) ? a[i] : -140;
-    const y = Number.isFinite(b[i]) ? b[i] : -140;
-    sum += Math.abs(x - y);
+// 声の帯域 (約 70Hz〜4kHz、fftSize 2048 @ 48kHz の 3〜175 番目の bin) を対数間隔の 12 帯域にまとめた
+// レベル (dB)。bin ごとだとマイクのノイズで細かく揺れるので、帯域で平均して音色の形だけを見る。
+const BAND_EDGES = Array.from({ length: 13 }, (_, i) => Math.round(3 * Math.pow(175 / 3, i / 12)));
+
+function bandLevels(spec) {
+  const out = new Float32Array(12);
+  for (let b = 0; b < 12; b++) {
+    const lo = BAND_EDGES[b];
+    const hi = Math.max(lo + 1, Math.min(BAND_EDGES[b + 1], spec.length));
+    let p = 0;
+    for (let i = lo; i < hi; i++) p += Math.pow(10, (Number.isFinite(spec[i]) ? spec[i] : -140) / 10);
+    out[b] = 10 * Math.log10(p / (hi - lo) + 1e-14);
   }
-  return sum / (hi - lo);
+  return out;
+}
+
+// 隣り合うフレームの音色の変化量。全体の音量の変化は差し引いて、形の変化だけを見る
+function bandFlux(a, b) {
+  let mean = 0;
+  for (let i = 0; i < a.length; i++) mean += b[i] - a[i];
+  mean /= a.length;
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += Math.abs(b[i] - a[i] - mean);
+  return sum / a.length;
 }
 
 // ---- 発話ごとの声の特徴を、セッション内の「普段」と比べた言葉にする (画面とサーバーで共通) ----
@@ -126,7 +143,9 @@ function describeVoice(segments) {
       if (rate <= medRate * 0.75) tags.push('ゆっくり');
       else if (rate >= medRate * 1.3) tags.push('早口');
     }
-    const longSustain = v.sustainSec >= 0.5 && (!hasBaseline || v.sustainSec >= medSustain * 1.8);
+    // 1 秒以上の伸ばしは普段と比べるまでもなく目立つので必ず伝える
+    const longSustain = v.sustainSec >= 1 ||
+      (v.sustainSec >= 0.5 && (!hasBaseline || v.sustainSec >= medSustain * 1.8));
     if (longSustain) {
       tags.push(hasBaseline
         ? `音を${v.sustainSec}秒伸ばした(普段${medSustain.toFixed(1)}秒)`
@@ -136,4 +155,4 @@ function describeVoice(segments) {
   });
 }
 
-if (typeof module !== 'undefined') module.exports = { ProsodyMeter, spectralFlux, describeVoice };
+if (typeof module !== 'undefined') module.exports = { ProsodyMeter, bandLevels, bandFlux, describeVoice };

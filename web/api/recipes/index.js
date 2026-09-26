@@ -17,6 +17,7 @@ module.exports = handle({
     if (!startedAt || !Array.isArray(segments)) {
       throw Object.assign(new Error('startedAt と segments が必要です'), { status: 400 });
     }
-    return store.save(await recipe.create({ startedAt, segments }));
+    const dictionary = await store.loadDictionary();
+    return store.save(await recipe.create({ startedAt, segments }, undefined, dictionary));
   },
 });

@@ -33,6 +33,27 @@ function renderList(recipes) {
   }
 }
 
+// お母さんが確認した「感覚の言葉 → 実際の量」
+function renderDictionary(entries) {
+  if (!entries.length) return;
+  const box = el('section', 'dictionary');
+  box.append(el('h2', null, 'この家の分量辞書'));
+  box.append(el('p', 'dict-sub', 'お母さんの「感覚の言葉」が、実際どれくらいの量なのか'));
+  const ul = el('ul', 'dict-list');
+  for (const e of entries) {
+    const li = el('li');
+    const top = el('div', 'ing-row');
+    top.append(el('span', 'ing-name', `${e.ingredient}「${e.expression}」`), el('span', 'ing-estimate', e.amount));
+    li.append(top);
+    const meta = [`${e.recipeTitle}より`, e.sustainSec ? `声を${e.sustainSec}秒伸ばして` : null,
+      e.count > 1 ? `${e.count}回確認` : null].filter(Boolean).join(' ・ ');
+    li.append(el('span', 'ing-note', meta));
+    ul.append(li);
+  }
+  box.append(ul);
+  listEl.after(box);
+}
+
 function renderDetail(r) {
   document.title = `${r.title} — おふくろの味`;
   messageEl.hidden = true;
@@ -86,17 +107,13 @@ function renderDetail(r) {
 function renderQuestionItem(q) {
   const item = el('div', 'qa');
   item.append(el('p', 'qa-q', `Q. ${q.question}`));
-  item.append(el('p', 'qa-a', q.aiAnswer));
-  if (q.momAnswer) {
-    item.append(el('p', 'qa-mom', `お母さんより: ${q.momAnswer}`));
-  } else if (q.needsMom) {
-    item.append(el('p', 'qa-wait', 'お母さんに聞いています…'));
-  }
+  if (q.momAnswer) item.append(el('p', 'qa-mom', `A. ${q.momAnswer}`));
+  else item.append(el('p', 'qa-wait', 'お母さんの回答待ち'));
   return item;
 }
 
 function renderQuestions(r) {
-  detailEl.append(el('h2', null, 'わからないところを聞く'));
+  detailEl.append(el('h2', null, 'お母さんに聞く'));
   const list = el('div', 'qa-list');
   for (const q of r.familyQuestions || []) list.append(renderQuestionItem(q));
   detailEl.append(list);
@@ -114,7 +131,7 @@ function renderQuestions(r) {
     const question = input.value.trim();
     if (!question) return;
     button.disabled = true;
-    status.textContent = '考えています…';
+    status.textContent = '送っています…';
     try {
       const res = await fetch(`/api/recipes/${encodeURIComponent(r.id)}/ask`, {
         method: 'POST',
@@ -125,7 +142,7 @@ function renderQuestions(r) {
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       list.append(renderQuestionItem(data));
       input.value = '';
-      status.textContent = data.needsMom ? 'お母さんにも届けました。答えが来たらここに表示されます' : '';
+      status.textContent = 'お母さんに届けました。答えが来たらここに表示されます';
     } catch (err) {
       status.textContent = `聞けませんでした: ${err.message}`;
     } finally {
@@ -150,7 +167,9 @@ async function main() {
       if (r) renderDetail(r);
       else messageEl.textContent = 'レシピが見つかりません';
     } else {
-      renderList(await fetchJson('/api/recipes'));
+      const [recipes, dictionary] = await Promise.all([fetchJson('/api/recipes'), fetchJson('/api/dictionary')]);
+      renderList(recipes);
+      renderDictionary(dictionary || []);
     }
   } catch (err) {
     messageEl.textContent = `読み込めませんでした: ${err.message}`;

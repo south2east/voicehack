@@ -12,7 +12,6 @@ const { describeVoice } = require('../public/prosody');
 
 const MODEL = process.env.OPENAI_MODEL || 'gpt-6-luna';
 const PROMPT_PATH = path.join(__dirname, '..', 'prompts', 'recipe_system.md');
-const FAMILY_PROMPT_PATH = path.join(__dirname, '..', 'prompts', 'family_qa_system.md');
 // これ以上話していない時間があれば、LLM に「無音」として伝える (工程の区切り・加熱時間の手がかり)
 const GAP_MARK_SEC = 60;
 
@@ -107,8 +106,11 @@ function formatTranscript(startedAt, segments) {
   return lines.join('\n') || '(認識されたテキストはありません)';
 }
 
-function buildInput(doc) {
-  const parts = [`# 文字起こし\n\n${doc.transcript}`];
+function buildInput(doc, dictionary) {
+  const parts = [];
+  const dict = formatDictionary(dictionary);
+  if (dict) parts.push(dict);
+  parts.push(`# 文字起こし\n\n${doc.transcript}`);
   if (doc.recipe) {
     parts.push(`# 現在のレシピ\n\n${JSON.stringify(doc.recipe, null, 2)}`);
   }
@@ -122,12 +124,12 @@ function buildInput(doc) {
   return parts.join('\n\n');
 }
 
-async function callModel(doc, apiKey) {
+async function callModel(doc, apiKey, dictionary) {
   const instructions = fs.readFileSync(PROMPT_PATH, 'utf8'); // 毎回読むので再起動なしでチューニングできる
   const res = await getClient(apiKey).responses.create({
     model: MODEL,
     instructions,
-    input: buildInput(doc),
+    input: buildInput(doc, dictionary),
     text: {
       format: { type: 'json_schema', name: 'recipe', schema: RECIPE_SCHEMA, strict: true },
     },
@@ -136,7 +138,7 @@ async function callModel(doc, apiKey) {
 }
 
 // 文字起こしから最初のレシピ案と質問を作る (保存は呼び出し側)
-async function create({ startedAt, segments, audioUrl = null }, apiKey) {
+async function create({ startedAt, segments, audioUrl = null }, apiKey, dictionary) {
   const doc = {
     id: crypto.randomUUID(),
     createdAt: new Date().toISOString(),
@@ -146,15 +148,15 @@ async function create({ startedAt, segments, audioUrl = null }, apiKey) {
     recipe: null,
     history: [],
   };
-  doc.recipe = await callModel(doc, apiKey);
+  doc.recipe = await callModel(doc, apiKey, dictionary);
   doc.updatedAt = new Date().toISOString();
   return doc;
 }
 
 // 質問への回答を反映してレシピを更新する。answers: [{ question, answer }]
-async function answer(doc, answers, apiKey) {
+async function answer(doc, answers, apiKey, dictionary) {
   doc.history.push({ at: new Date().toISOString(), answers });
-  doc.recipe = await callModel(doc, apiKey);
+  doc.recipe = await callModel(doc, apiKey, dictionary);
   doc.updatedAt = new Date().toISOString();
   return doc;
 }
@@ -166,49 +168,69 @@ function finalize(doc) {
   return doc;
 }
 
-// ---- 家族 (息子) からの質問 ----
+// ---- この家の分量の辞書 ----
+// お母さんが確認・訂正した「感覚の言葉 → 実際の量」を貯めて、次のレシピから推定に使う。
+// dictionary: { entries: [{ key, ingredient, expression, amount, sustainSec, recipeTitle, recipeId, confirmedAt, count }] }
 
-const FAMILY_ANSWER_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['answer', 'needs_mom'],
-  properties: {
-    answer: { type: 'string', description: '息子への答え (2〜4 文)' },
-    needs_mom: { type: 'boolean', description: '記録になく、お母さんに聞く必要があるか' },
-  },
-};
-
-function familyContext(doc) {
-  const { questions, status, ...recipe } = doc.recipe;
-  const parts = [
-    `# レシピ\n\n${JSON.stringify(recipe, null, 2)}`,
-    `# お母さんが料理しながら話した言葉\n\n${doc.transcript}`,
-  ];
-  const qa = (doc.familyQuestions || []).filter((q) => q.momAnswer);
-  if (qa.length) {
-    parts.push('# これまでにお母さんが答えたこと\n\n' +
-      qa.map((q) => `- Q: ${q.question}\n  A (お母さん): ${q.momAnswer}`).join('\n'));
-  }
-  return parts.join('\n\n');
+// 伸ばし棒の数や声の注記の括弧を除いた、言葉の見出し (「さーーっと (3秒伸ばして)」→「さーっと」)
+function normalizeExpression(original) {
+  return original.replace(/[（(].*?[)）]/g, '').replace(/ー+/g, 'ー').replace(/[、。,.\s]/g, '').trim();
 }
 
-// 息子の質問に、レシピと母の言葉から答える。答えられなければお母さんに回す (needsMom)
-async function askFamily(doc, question, apiKey) {
-  const res = await getClient(apiKey).responses.create({
-    model: MODEL,
-    instructions: fs.readFileSync(FAMILY_PROMPT_PATH, 'utf8'),
-    input: `${familyContext(doc)}\n\n# 息子からの質問\n\n${question}`,
-    text: {
-      format: { type: 'json_schema', name: 'family_answer', schema: FAMILY_ANSWER_SCHEMA, strict: true },
-    },
+// 数字や計量単位で言ったもの (卵3つ・200g・大さじ1) は辞書に入れない
+function isSensory(original) {
+  const expr = original.replace(/[（(].*?[)）]/g, '');
+  return !/[0-9０-９一二三四五六七八九十半]|大さじ|小さじ|カップ|グラム|cc|ml|g\b/i.test(expr);
+}
+
+// 確定したレシピから、確信度が高い感覚的な分量を辞書に取り込む
+function learnDictionary(dictionary, doc) {
+  const entries = [...((dictionary && dictionary.entries) || [])];
+  for (const ing of doc.recipe.ingredients) {
+    if (!ing.original || !ing.estimate || ing.confidence !== 'high' || !isSensory(ing.original)) continue;
+    const expression = normalizeExpression(ing.original);
+    if (!expression) continue;
+    const key = `${ing.name}:${expression}`;
+    const sustain = ing.original.match(/(\d+(?:\.\d+)?)\s*秒/);
+    const entry = {
+      key,
+      ingredient: ing.name,
+      expression,
+      original: ing.original,
+      amount: ing.estimate,
+      sustainSec: sustain ? Number(sustain[1]) : null,
+      recipeTitle: doc.recipe.title,
+      recipeId: doc.id,
+      confirmedAt: doc.finalizedAt,
+    };
+    const i = entries.findIndex((e) => e.key === key);
+    if (i >= 0) {
+      const sameRecipe = entries[i].recipeId === doc.id; // 同じレシピの確定し直しは数えない
+      entries[i] = { ...entry, count: (entries[i].count || 1) + (sameRecipe ? 0 : 1) };
+    }
+    else entries.push({ ...entry, count: 1 });
+  }
+  return { entries: entries.slice(-200), updatedAt: new Date().toISOString() };
+}
+
+function formatDictionary(dictionary) {
+  const entries = (dictionary && dictionary.entries) || [];
+  if (!entries.length) return '';
+  const lines = entries.map((e) => {
+    const voice = e.sustainSec ? ` / 声を${e.sustainSec}秒伸ばしていた` : '';
+    return `- ${e.ingredient}「${e.expression}」→ ${e.amount}  (「${e.recipeTitle}」で確認${voice}${e.count > 1 ? ` / ${e.count}回確認` : ''})`;
   });
-  const out = JSON.parse(res.output_text);
+  return `# この家の分量の辞書 (過去にお母さんが確認した量)\n\n${lines.join('\n')}`;
+}
+
+// ---- 家族 (息子) からの質問 ----
+
+// 息子の質問をためる。答えるのはお母さん (replyFamily)
+function askFamily(doc, question) {
   const item = {
     id: crypto.randomUUID(),
     question,
     askedAt: new Date().toISOString(),
-    aiAnswer: out.answer,
-    needsMom: out.needs_mom,
     momAnswer: null,
     momAnsweredAt: null,
   };
@@ -218,12 +240,12 @@ async function askFamily(doc, question, apiKey) {
 }
 
 // お母さんが家族の質問に答える。答えはレシピ本体にも反映する
-async function replyFamily(doc, questionId, momAnswer, apiKey) {
+async function replyFamily(doc, questionId, momAnswer, apiKey, dictionary) {
   const item = (doc.familyQuestions || []).find((q) => q.id === questionId);
   if (!item) throw Object.assign(new Error('question not found'), { status: 404 });
   item.momAnswer = momAnswer;
   item.momAnsweredAt = new Date().toISOString();
-  await answer(doc, [{ question: `(息子からの質問) ${item.question}`, answer: momAnswer }], apiKey);
+  await answer(doc, [{ question: `(息子からの質問) ${item.question}`, answer: momAnswer }], apiKey, dictionary);
   return doc;
 }
 
@@ -231,8 +253,7 @@ async function replyFamily(doc, questionId, momAnswer, apiKey) {
 function toPublic(doc) {
   const { questions, status, ...recipe } = doc.recipe;
   const familyQuestions = (doc.familyQuestions || []).map(
-    ({ id, question, askedAt, aiAnswer, needsMom, momAnswer, momAnsweredAt }) =>
-      ({ id, question, askedAt, aiAnswer, needsMom, momAnswer, momAnsweredAt })
+    ({ id, question, askedAt, momAnswer, momAnsweredAt }) => ({ id, question, askedAt, momAnswer, momAnsweredAt })
   );
   return { id: doc.id, createdAt: doc.createdAt, finalizedAt: doc.finalizedAt, ...recipe, familyQuestions };
 }
@@ -240,5 +261,6 @@ function toPublic(doc) {
 const isValidId = (id) => typeof id === 'string' && /^[0-9a-f-]{36}$/.test(id);
 
 module.exports = {
-  create, answer, finalize, askFamily, replyFamily, toPublic, isValidId, formatTranscript, MODEL,
+  create, answer, finalize, askFamily, replyFamily, toPublic, isValidId, formatTranscript,
+  learnDictionary, formatDictionary, MODEL,
 };

@@ -11,7 +11,7 @@ module.exports = handle({
     if (!questionId || !answer || !answer.trim()) {
       throw Object.assign(new Error('questionId と answer が必要です'), { status: 400 });
     }
-    const doc = await store.load(req.query.id);
-    return store.save(await recipe.replyFamily(doc, questionId, answer.trim()));
+    const [doc, dictionary] = await Promise.all([store.load(req.query.id), store.loadDictionary()]);
+    return store.save(await recipe.replyFamily(doc, questionId, answer.trim(), undefined, dictionary));
   },
 });

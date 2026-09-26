@@ -36,4 +36,23 @@ async function listAll() {
   return docs.filter(Boolean).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-module.exports = { save, load, listAll };
+// この家の分量の辞書 (1 ファイル)
+const DICTIONARY_PATH = 'dictionary.json';
+
+async function loadDictionary() {
+  const res = await get(DICTIONARY_PATH, { access: 'private', useCache: false });
+  if (!res) return { entries: [] };
+  return JSON.parse(await new Response(res.stream).text());
+}
+
+async function saveDictionary(dictionary) {
+  await put(DICTIONARY_PATH, JSON.stringify(dictionary), {
+    access: 'private',
+    contentType: 'application/json',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+  return dictionary;
+}
+
+module.exports = { save, load, listAll, loadDictionary, saveDictionary };

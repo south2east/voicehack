@@ -34,6 +34,7 @@ let tickTimer = null;
 let wakeLock = null;
 let chunk = null; // { startedAt, firstVoiceAt, speechMs, lastVoiceAt }
 let noiseFloor = null;
+let wasVoiced = false;
 let prosody = null; // ProsodyMeter (prosody.js): 発話ごとの声の大きさ・伸ばし
 let freqBuf = null;
 let pendingCount = 0;
@@ -182,10 +183,13 @@ function tick() {
   for (const v of buf) sum += v * v;
   const rms = Math.sqrt(sum / buf.length);
 
-  // 周りの音の大きさを追いかけ、それより十分大きい音を声とみなす
+  // 周りの音の大きさを追いかけ、それより十分大きい音を声とみなす。
+  // 一度声になったら半分の音量 (-6dB) までは声とみなし続ける: 「さーーー」と伸ばすうちに
+  // 声が小さくなっても、途中で発話が切れないようにするため
   if (noiseFloor === null) noiseFloor = rms;
   const threshold = Math.max(MIN_THRESHOLD, noiseFloor * 2.5);
-  const voiced = rms > threshold;
+  const voiced = rms > (wasVoiced ? threshold * 0.5 : threshold);
+  wasVoiced = voiced;
   if (!voiced) noiseFloor = noiseFloor * 0.95 + rms * 0.05;
 
   analyser.getFloatFrequencyData(freqBuf);
@@ -522,7 +526,7 @@ async function loadFamilyQuestions() {
   let count = 0;
   for (const doc of docs) {
     for (const q of doc.familyQuestions || []) {
-      if (!q.needsMom || q.momAnswer) continue;
+      if (q.momAnswer) continue;
       count++;
       const item = el('div', 'question');
       item.append(el('p', 'muted', `「${doc.recipe.title}」について`));
@@ -568,6 +572,11 @@ if (!navigator.mediaDevices || !window.MediaRecorder) {
 }
 
 loadFamilyQuestions();
+// 家族からの新しい質問に気づけるように、ときどき見に行く (録音中は邪魔しない)
+setInterval(() => {
+  const typing = [...familyListEl.querySelectorAll('input')].some((i) => i.value || i === document.activeElement);
+  if (!recorder && !typing) loadFamilyQuestions();
+}, 60 * 1000);
 
 // 再読み込みしても、直前の記録とレシピを復元する
 (async () => {
