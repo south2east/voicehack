@@ -172,3 +172,43 @@ def mora_rate(x: np.ndarray, sr: int, model: str = "small",
         "utterances": [{"start": u.start, "end": u.end, "text": u.text, "kana": u.kana,
                         "morae": u.morae} for u in utts],
     }
+
+
+def mora_rate_from_text(x: np.ndarray, sr: int, text: str) -> dict:
+    """外部の文字起こし (Google Speech-to-Text など) の全文からモーラ数を数え,
+    分離後の音声 x の発話区間の長さで割る. 音声認識をやり直さないので速い.
+    区間ごとの対応は取らず, 最初の発話の始まり〜最後の発話の終わりを発話区間とする."""
+    text = (text or "").strip()
+    spans = active_intervals(x, sr)
+    if not text or not spans:
+        return {"backend": "transcript", "morae": 0, "speech_rate_mora_per_s": None,
+                "articulation_rate_mora_per_s": None, "text": text}
+    kana = to_kana(text)
+    morae = count_morae(kana)
+    span = spans[-1][1] - spans[0][0]
+    phon = sum(b - a for a, b in spans)
+    return {
+        "backend": "transcript",
+        "morae": morae,
+        "speech_rate_mora_per_s": morae / span if span > 0 else None,
+        "articulation_rate_mora_per_s": morae / phon if phon > 0 else None,
+        "speaking_span_s": span,
+        "phonation_time_s": phon,
+        "text": text,
+        "kana": kana,
+    }
+
+
+def load_transcript(path) -> str:
+    """文字起こしファイルを読む. JSON なら fullText (無ければ segments[].text を連結), それ以外は本文."""
+    import json
+    from pathlib import Path
+
+    p = Path(path)
+    raw = p.read_text(encoding="utf-8")
+    if p.suffix.lower() == ".json":
+        d = json.loads(raw)
+        if d.get("fullText"):
+            return str(d["fullText"])
+        return "".join(str(s.get("text", "")) for s in d.get("segments", []))
+    return raw

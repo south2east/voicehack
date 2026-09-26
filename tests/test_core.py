@@ -285,3 +285,21 @@ def test_dotenv_parsing(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text('# comment\nOTHER=1\nexport GROQ_API_KEY="gsk_abc"\n')
     monkeypatch.chdir(tmp_path)
     assert g._from_dotenv() == "gsk_abc"
+
+
+def test_mora_rate_from_transcript(tmp_path):
+    pytest.importorskip("fugashi")
+    import json
+
+    from voicehack.asr import load_transcript, mora_rate_from_text
+
+    t = np.arange(4 * SR) / SR
+    ph = 2 * np.pi * np.cumsum(150 + 20 * np.sin(2 * np.pi * t)) / SR
+    x = 0.3 * sum(np.sin(k * ph) / k for k in range(1, 12)) * ((t > 1.0) & (t < 3.0))
+    x = x + 0.001 * np.random.default_rng(9).standard_normal(len(t))
+    r = mora_rate_from_text(x, SR, "今日はいい天気です")      # 10 モーラ / 約 2 秒
+    assert r["morae"] == 10
+    assert r["speech_rate_mora_per_s"] == pytest.approx(5.0, rel=0.15)
+    f = tmp_path / "t.json"
+    f.write_text(json.dumps({"fullText": "", "segments": [{"text": "こんにちは"}, {"text": "。"}]}))
+    assert load_transcript(f) == "こんにちは。"

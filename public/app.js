@@ -8,6 +8,12 @@ const partialTextEl = document.getElementById('partialText');
 const jsonOutputEl = document.getElementById('jsonOutput');
 const downloadBtn = document.getElementById('downloadBtn');
 const audioDownloadEl = document.getElementById('audioDownload');
+const analyzeDnnEl = document.getElementById('analyzeDnn');
+const analysisAreaEl = document.getElementById('analysisArea');
+const analysisStatusEl = document.getElementById('analysisStatus');
+const analysisBodyEl = document.getElementById('analysisBody');
+const metricsEl = document.getElementById('metrics');
+const reportLinkEl = document.getElementById('reportLink');
 
 let ws = null;
 let audioContext = null;
@@ -58,6 +64,7 @@ async function start() {
         type: 'start',
         sampleRate,
         languageCode: 'ja-JP',
+        analyzeDnn: analyzeDnnEl.checked,
       })
     );
   };
@@ -95,6 +102,8 @@ async function start() {
   partialTextEl.textContent = '';
   jsonOutputEl.textContent = '記録中…';
   downloadBtn.disabled = true;
+  analysisAreaEl.hidden = true;
+  analysisBodyEl.hidden = true;
   audioDownloadEl.classList.add('is-disabled');
   audioDownloadEl.removeAttribute('download');
   audioDownloadEl.href = '#';
@@ -153,6 +162,24 @@ function handleServerMessage(msg) {
         audioDownloadEl.classList.remove('is-disabled');
       }
       finishUI();
+      // 解析が続く場合は結果を受け取るまで接続を保つ
+      if (!msg.analysisPending && ws) ws.close();
+      break;
+    case 'analysis_started':
+      analysisAreaEl.hidden = false;
+      analysisBodyEl.hidden = true;
+      reportLinkEl.classList.add('is-disabled');
+      analysisStatusEl.textContent = msg.dnn
+        ? '解析中… (深層学習で分離するため 1 分ほどかかることがあります)'
+        : '解析中… (数秒かかります)';
+      break;
+    case 'analysis':
+      showAnalysis(msg.analysis);
+      if (ws) ws.close();
+      break;
+    case 'analysis_error':
+      analysisAreaEl.hidden = false;
+      analysisStatusEl.textContent = `解析できませんでした: ${msg.message}`;
       if (ws) ws.close();
       break;
     case 'error':
@@ -161,6 +188,52 @@ function handleServerMessage(msg) {
     default:
       break;
   }
+}
+
+function fmt(v, digits, unit) {
+  return typeof v === 'number' && isFinite(v) ? `${v.toFixed(digits)}${unit}` : '—';
+}
+
+function showAnalysis(a) {
+  const m = a.metrics;
+  const cards = [
+    ['大きさ', fmt(m.loudnessLufs, 1, ' LUFS'), `ピーク ${fmt(m.peakDbfs, 1, ' dBFS')}`],
+    ['声の高さ', fmt(m.f0MedianHz, 0, ' Hz'), m.note ? `中央値 (${m.note})` : '中央値'],
+    ['抑揚', fmt(m.f0RangeSemitones, 1, ' 半音'), '高さの幅 (5〜95%)'],
+    [
+      '話す速さ',
+      typeof m.moraRate === 'number' ? fmt(m.moraRate, 1, ' モーラ/秒') : fmt(m.syllableRate, 1, ' 音節/秒'),
+      typeof m.moraRate === 'number'
+        ? `間を除くと ${fmt(m.articulationMoraRate, 1, '')} / ${m.morae} モーラ`
+        : '文字起こしなし (音節数から推定)',
+    ],
+    ['ポーズ', typeof m.pauses === 'number' ? `${m.pauses} 回` : '—', '0.3 秒以上の間'],
+    ['環境音', fmt(m.environmentLufs, 1, ' LUFS'), '声を除いた残り'],
+  ];
+  metricsEl.innerHTML = '';
+  for (const [label, value, sub] of cards) {
+    const div = document.createElement('div');
+    div.className = 'metric';
+    div.innerHTML = '<span class="metric-label"></span><span class="metric-value"></span><span class="metric-sub"></span>';
+    div.children[0].textContent = label;
+    div.children[1].textContent = value;
+    div.children[2].textContent = sub;
+    metricsEl.appendChild(div);
+  }
+  const bust = `?t=${Date.now()}`;
+  document.getElementById('audioOriginal').src = a.audio.original;
+  document.getElementById('audioSpeech').src = a.audio.speech + bust;
+  document.getElementById('audioEnvironment').src = a.audio.environment + bust;
+  document.getElementById('figProsody').src = a.figures.prosody + bust;
+  document.getElementById('figSeparation').src = a.figures.separation + bust;
+  document.getElementById('figSpectrogram').src = a.figures.spectrogram + bust;
+  document.getElementById('figSpectrum').src = a.figures.spectrum + bust;
+  document.getElementById('methodNote').textContent = `分離の方式: ${a.method}`;
+  reportLinkEl.href = a.reportUrl;
+  reportLinkEl.classList.remove('is-disabled');
+  analysisStatusEl.textContent = '';
+  analysisAreaEl.hidden = false;
+  analysisBodyEl.hidden = false;
 }
 
 function finishUI() {

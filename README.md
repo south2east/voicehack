@@ -8,6 +8,24 @@
 | [2. 音声解析ツール](#2-音声解析ツール-python) | Python | `src/voicehack/`, `experiments/`, `tests/` | スペクトル・大きさ (LUFS)・声の高さ・話す速さの計測, 声と環境音の分離 |
 | 調査ノート | — | `research_notes/`, `reports/` | 録音データのノイズ除去手法の調査 |
 
+**1 と 2 は連携しています.** Web アプリで「終了」を押すと, 録音を Python の解析ツールに渡し,
+結果 (大きさ・声の高さ・話す速さ, 元の音 / 声だけ / 環境音だけの聞き比べ, 図) を同じ画面に表示します.
+
+```
+ブラウザ ─ マイク ─▶ server.js ─┬─▶ Google Speech-to-Text (生の音のまま. リアルタイム文字起こし)
+                                └─▶ recordings/: MP4 と WAV で保存
+「終了」 → uv run voicehack analyze recordings/<id>.wav --transcript transcripts/<id>.json
+           (文字起こしからモーラ/秒を計算. Whisper は使わない)
+         → analysis/<id>/ (report.json, 図, speech.wav, environment.wav) → 画面の「音声解析」パネル
+```
+
+- 文字起こし (STT) には **ノイズ除去していない生の音** を渡します. 分離後の音を認識させると誤りが増えるため
+  (本リポジトリの実測, および `reports/録音データのノイズ除去手法.md` の調査結果).
+- 「声と重なった物音も分離する」にチェックすると `--dnn` で解析します (15 秒の録音で約 15 秒).
+  外すと数秒で終わります.
+- 使うには 1 と 2 の両方のセットアップが必要です (`npm install` と `uv sync --extra asr`).
+  解析を止めたいときは `.env` に `VOICEHACK_ANALYZE=0`.
+
 どちらも設定はリポジトリ直下の **`.env`** (ひな形: `.env.example`) から読みます. `.env` は git 管理外です.
 
 ```bash

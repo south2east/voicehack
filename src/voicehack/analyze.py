@@ -18,7 +18,7 @@ from .spectral import octave_bands, spectral_features, spectrum, stft
 
 
 def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
-            asr: bool | str = False, dnn: bool = False,
+            asr: bool | str = False, dnn: bool = False, transcript: str | None = None,
             near_field_db: float | None = 15.0) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -70,6 +70,14 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
         "pitch": pitch_summary(pitch),
         "rate": rate_summary(rate, wn, mrate),
     }
+    if transcript is not None:
+        # 外部 (Google STT など) の文字起こしからモーラ速度を出す. 読みの解析に asr extra が必要
+        try:
+            from .asr import mora_rate_from_text
+
+            summary["rate"]["transcript"] = mora_rate_from_text(voice, sr, transcript)
+        except ImportError as e:  # pragma: no cover
+            summary["rate"]["transcript"] = {"error": f"読みの解析に uv sync --extra asr が必要: {e}"}
     if asr:
         from .asr import mora_rate
 

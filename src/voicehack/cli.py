@@ -29,6 +29,10 @@ def _print(s: dict) -> None:
     dj = r["de_jong_2009"]
     print(f"           参考: de Jong 法 {dj['speech_rate_syll_per_s']:.2f} 音節/s, "
           f"変調周波数 {_f(r['modulation_rate_hz'], 2)} Hz")
+    if r.get("transcript", {}).get("morae"):
+        t = r["transcript"]
+        print(f"[モーラ]   (文字起こし) {t['morae']} モーラ, 発話速度 {_f(t['speech_rate_mora_per_s'], 2)} モーラ/s, "
+              f"調音速度 {_f(t['articulation_rate_mora_per_s'], 2)} モーラ/s")
     if "asr" in r:
         a = r["asr"]
         print(f"[モーラ]   ({a['backend']}) {a['morae']} モーラ, 発話速度 {_f(a['speech_rate_mora_per_s'], 2)} モーラ/s, "
@@ -59,6 +63,8 @@ def main(argv: list[str] | None = None) -> None:
                    help="深層学習 (SepFormer) で声と重なった物音も分離 (要: uv sync --extra dnn)")
     a.add_argument("--keep-far-voices", action="store_true",
                    help="遠くの小さな声 (TV・周りの人) も声として残す (既定: 最大の発話より 15 dB 以上小さい声は環境音)")
+    a.add_argument("--transcript", default=None,
+                   help="既にある文字起こし (JSON なら fullText, それ以外は本文) からモーラ速度を出す")
     a.add_argument("--asr", nargs="?", const="local", default=None, choices=["local", "groq"],
                    help="音声認識でモーラ速度を測る. local (既定, Mac 内で完結, 要: uv sync --extra asr) / "
                         "groq (Groq Cloud に音声を送信, 要: 環境変数 GROQ_API_KEY)")
@@ -75,7 +81,13 @@ def main(argv: list[str] | None = None) -> None:
     if args.cmd == "analyze":
         audio = load(args.input, sr=args.sr)
         out = args.out or f"out/{Path(args.input).stem}"
+        text = None
+        if args.transcript:
+            from .asr import load_transcript
+
+            text = load_transcript(args.transcript)
         s = analyze(audio, out, separate_noise=not args.no_separate, asr=args.asr or False, dnn=args.dnn,
+                    transcript=text,
                     near_field_db=None if args.keep_far_voices else 15.0)
     else:
         audio = record(args.duration, args.sr)

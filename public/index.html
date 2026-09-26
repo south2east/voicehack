@@ -3,14 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>voicehack — リアルタイム文字起こし</title>
+  <title>voicehack — 文字起こしと音声解析</title>
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <main class="app">
     <header>
       <h1>voicehack</h1>
-      <p class="subtitle">Google Cloud Speech-to-Text (Chirp) でリアルタイム文字起こし</p>
+      <p class="subtitle">Google Cloud Speech-to-Text (Chirp) でリアルタイム文字起こしし、終了後に声の大きさ・高さ・速さの解析と、声/環境音の分離を行います</p>
     </header>
 
     <section class="controls">
@@ -18,6 +18,10 @@
       <button id="stopBtn" class="btn btn-stop" disabled>■ 終了</button>
       <span id="status" class="status">待機中</span>
     </section>
+    <label class="option">
+      <input type="checkbox" id="analyzeDnn" />
+      終了後の解析で、声と重なった物音も分離する (深層学習・時間がかかる)
+    </label>
 
     <section class="transcript-area">
       <h2>文字起こし</h2>
@@ -34,6 +38,27 @@
         </div>
       </div>
       <pre id="jsonOutput" class="json-output">まだセッションがありません</pre>
+    </section>
+
+    <section class="analysis-area" id="analysisArea" hidden>
+      <div class="result-header">
+        <h2>音声解析 (大きさ・声の高さ・話す速さ・声と環境音の分離)</h2>
+        <a id="reportLink" class="btn btn-secondary btn-link is-disabled" href="#" target="_blank" rel="noopener">report.json</a>
+      </div>
+      <p id="analysisStatus" class="analysis-status">解析中…</p>
+      <div id="analysisBody" hidden>
+        <div class="metrics" id="metrics"></div>
+        <div class="players">
+          <div class="player"><span>元の音</span><audio id="audioOriginal" controls preload="none"></audio></div>
+          <div class="player"><span>声だけ</span><audio id="audioSpeech" controls preload="none"></audio></div>
+          <div class="player"><span>環境音だけ</span><audio id="audioEnvironment" controls preload="none"></audio></div>
+        </div>
+        <p class="note" id="methodNote"></p>
+        <figure><figcaption>大きさ・声の高さ・話す速さ</figcaption><img id="figProsody" alt="大きさ・声の高さ・話す速さのグラフ" /></figure>
+        <figure><figcaption>声と環境音の分離</figcaption><img id="figSeparation" alt="分離結果のスペクトログラム" /></figure>
+        <figure><figcaption>スペクトログラム</figcaption><img id="figSpectrogram" alt="スペクトログラム" /></figure>
+        <figure><figcaption>スペクトル</figcaption><img id="figSpectrum" alt="スペクトル" /></figure>
+      </div>
     </section>
   </main>
 

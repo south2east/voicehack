@@ -11,7 +11,10 @@ node_modules/
 transcripts/*.json
 !transcripts/.gitkeep
 recordings/*.mp4
+recordings/*.wav
 !recordings/.gitkeep
+analysis/*
+!analysis/.gitkeep
 npm-debug.log*
 
 # ---- 2. 音声解析ツール (Python) ----
