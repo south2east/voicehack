@@ -1,0 +1,303 @@
+:root {
+  --bg: #fbf7f0;
+  --panel: #ffffff;
+  --border: #eadfd2;
+  --text: #2b2521;
+  --muted: #7a6f66;
+  --accent: #c2410c;
+  --start: #15803d;
+  --stop: #b91c1c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --panel: #262220;
+    --border: #3a332e;
+    --text: #f1ebe4;
+    --muted: #a8998c;
+    --accent: #fb923c;
+    --start: #22c55e;
+    --stop: #ef4444;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  line-height: 1.7;
+}
+
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 20px 16px 64px;
+}
+
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--accent);
+}
+
+.subtitle,
+.muted {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.book-link {
+  flex-shrink: 0;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+  padding-top: 6px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.btn {
+  display: inline-block;
+  border: none;
+  border-radius: 10px;
+  padding: 12px 18px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: inherit;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.controls .btn {
+  flex: 1;
+  padding: 18px 12px;
+  font-size: 1.1rem;
+}
+
+.btn-start {
+  background: var(--start);
+  color: #fff;
+}
+
+.btn-stop {
+  background: var(--stop);
+  color: #fff;
+}
+
+.btn-secondary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-small {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  background: var(--border);
+  color: var(--text);
+}
+
+.btn-wide {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.status {
+  width: 100%;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.status.recording {
+  color: var(--stop);
+  font-weight: 700;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: var(--muted);
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.panel-header h2 {
+  margin: 0;
+}
+
+.panel-header .btn {
+  padding: 8px 12px;
+  font-size: 0.9rem;
+}
+
+.transcript {
+  max-height: 40vh;
+  overflow-y: auto;
+  min-height: 2em;
+}
+
+.line {
+  margin: 0 0 4px;
+}
+
+.line-time {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-right: 8px;
+}
+
+.pending {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.questions {
+  display: grid;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 2px solid var(--accent);
+  border-radius: 10px;
+}
+
+.question-text {
+  margin: 0 0 6px;
+  font-weight: 600;
+}
+
+.question-input {
+  width: 100%;
+  padding: 12px;
+  font-size: 1rem;
+  font-family: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.recipe-title {
+  margin: 0 0 4px;
+  font-size: 1.3rem;
+}
+
+.recipe-card h4 {
+  margin: 16px 0 6px;
+}
+
+.ingredients,
+.steps,
+.tips {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+.ingredients li,
+.steps li {
+  margin-bottom: 8px;
+}
+
+.ing-name {
+  font-weight: 700;
+  margin-right: 6px;
+}
+
+.ing-original {
+  color: var(--accent);
+}
+
+.sub {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #fff;
+}
+
+.badge-medium {
+  background: #78716c;
+}
+
+.badge-low {
+  background: #c2410c;
+}
+
+.sample summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.sample-script {
+  margin: 8px 0 12px;
+  padding-left: 1.4em;
+  font-size: 1.1rem;
+  line-height: 1.9;
+}
+
+.sample-script mark {
+  background: #fed7aa;
+  color: #7c2d12;
+  padding: 0 3px;
+  border-radius: 3px;
+  font-weight: 700;
+}
+
+.sample-note {
+  color: var(--muted);
+  font-size: 0.9rem;
+}

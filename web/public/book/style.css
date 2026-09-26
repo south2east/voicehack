@@ -1,0 +1,174 @@
+:root {
+  --bg: #fbf7f0;
+  --paper: #ffffff;
+  --text: #2b2521;
+  --muted: #7a6f66;
+  --accent: #c2410c;
+  --line: #eadfd2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1917;
+    --paper: #262220;
+    --text: #f1ebe4;
+    --muted: #a8998c;
+    --accent: #fb923c;
+    --line: #3a332e;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+  line-height: 1.7;
+}
+
+.page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.site-header {
+  margin-bottom: 24px;
+}
+
+.site-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.site-sub,
+.message {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.recipe-list {
+  display: grid;
+  gap: 12px;
+}
+
+.recipe-link {
+  display: grid;
+  gap: 2px;
+  padding: 16px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.recipe-link-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.recipe-link-summary,
+.recipe-link-date {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.recipe {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px 18px;
+}
+
+.back {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.recipe-title {
+  margin: 8px 0 0;
+  font-size: 1.6rem;
+}
+
+.recipe-meta {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.recipe h2 {
+  margin: 24px 0 8px;
+  font-size: 1.1rem;
+  border-bottom: 2px solid var(--line);
+  padding-bottom: 4px;
+}
+
+.ingredients {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ingredients li {
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--line);
+}
+
+.ing-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ing-name {
+  font-weight: 600;
+}
+
+.ing-estimate {
+  text-align: right;
+}
+
+.ing-original {
+  display: block;
+  color: var(--accent);
+  font-size: 0.85rem;
+}
+
+.ing-note,
+.step-meta,
+.step-tip {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+.steps li {
+  margin-bottom: 12px;
+}
+
+.step-text {
+  margin: 0;
+}
+
+.step-tip::before {
+  content: "コツ: ";
+}
+
+.tips {
+  margin: 0;
+  padding-left: 1.2em;
+}

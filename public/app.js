@@ -5,12 +5,17 @@ const stopBtn = document.getElementById('stopBtn');
 const statusEl = document.getElementById('status');
 const finalTextEl = document.getElementById('finalText');
 const partialTextEl = document.getElementById('partialText');
-const jsonOutputEl = document.getElementById('jsonOutput');
+const textOutputEl = document.getElementById('textOutput');
+const copyBtn = document.getElementById('copyBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const audioDownloadEl = document.getElementById('audioDownload');
 const analysisStatusEl = document.getElementById('analysisStatus');
 const analysisMetricsEl = document.getElementById('analysisMetrics');
 const analysisImagesEl = document.getElementById('analysisImages');
+
+const recipeBtn = document.getElementById('recipeBtn');
+const recipeStatusEl = document.getElementById('recipeStatus');
+const recipeViewEl = document.getElementById('recipeView');
 
 const ANALYSIS_POLL_MS = 2000;
 
@@ -20,7 +25,10 @@ let sourceNode = null;
 let processorNode = null;
 let mediaStream = null;
 let lastSession = null;
+let lastText = '';
 let analysisTimer = null;
+let currentRecipe = null;
+let wakeLock = null;
 
 function setStatus(text, recording) {
   statusEl.textContent = text;
@@ -44,7 +52,16 @@ async function start() {
   setStatus('マイクにアクセス中…');
 
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // ブラウザ既定のノイズ抑制・自動音量調整・エコー除去は認識精度を下げる
+    // (音が歪む / AGC で音割れする) ので切り、マイクの生音をそのまま送る
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
   } catch (err) {
     setStatus('マイクへのアクセスが拒否されました');
     startBtn.disabled = false;
@@ -99,12 +116,15 @@ async function start() {
 
   finalTextEl.textContent = '';
   partialTextEl.textContent = '';
-  jsonOutputEl.textContent = '記録中…';
+  textOutputEl.textContent = '記録中…';
+  copyBtn.disabled = true;
   downloadBtn.disabled = true;
   audioDownloadEl.classList.add('is-disabled');
   audioDownloadEl.removeAttribute('download');
   audioDownloadEl.href = '#';
   resetAnalysis();
+  resetRecipe();
+  requestWakeLock();
 
   setStatus('録音中… (話しかけてください)', true);
   stopBtn.disabled = false;
@@ -151,8 +171,10 @@ function handleServerMessage(msg) {
       finalTextEl.textContent += msg.transcript;
       break;
     case 'stopped':
-      showSession(msg.session);
+      showSession(msg.session, msg.text);
+      copyBtn.disabled = false;
       downloadBtn.disabled = false;
+      recipeBtn.disabled = false;
       if (lastSession.audioUrl) {
         audioDownloadEl.href = lastSession.audioUrl;
         audioDownloadEl.download = `recording_${lastSession.sessionId}.mp4`;
@@ -173,9 +195,10 @@ function handleServerMessage(msg) {
   }
 }
 
-function showSession(session) {
+function showSession(session, text) {
   lastSession = session;
-  jsonOutputEl.textContent = JSON.stringify(session, null, 2);
+  lastText = text;
+  textOutputEl.textContent = text;
 }
 
 // 解析はサーバー側で録音終了後に走るので、終わるまで定期的に問い合わせる
@@ -185,9 +208,9 @@ function pollAnalysis(sessionId) {
     try {
       const res = await fetch(`/api/sessions/${sessionId}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const session = await res.json();
+      const { session, text } = await res.json();
       if (!lastSession || lastSession.sessionId !== sessionId) return;
-      showSession(session);
+      showSession(session, text);
       renderAnalysis(session.analysis);
       if (session.analysis && session.analysis.status === 'running') pollAnalysis(sessionId);
     } catch (err) {
@@ -270,21 +293,201 @@ function renderAnalysis(analysis) {
   analysisImagesEl.append(link);
 }
 
+// 調理中に画面がスリープするとマイクが止まるので、録音中はスリープさせない
+async function requestWakeLock() {
+  try {
+    if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+  } catch (_) {
+    /* 非対応・拒否時はそのまま */
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) wakeLock.release().catch(() => {});
+  wakeLock = null;
+}
+
+// ---- レシピ ----
+
+function el(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined && text !== null) e.textContent = text;
+  return e;
+}
+
+function resetRecipe() {
+  currentRecipe = null;
+  recipeBtn.disabled = true;
+  recipeStatusEl.textContent = '話し終えて「終了」を押すと、レシピにまとめられます';
+  recipeViewEl.replaceChildren();
+}
+
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+async function runRecipeAction(label, action) {
+  recipeStatusEl.textContent = label;
+  recipeViewEl.querySelectorAll('button, input').forEach((e) => {
+    e.disabled = true;
+  });
+  try {
+    currentRecipe = await action();
+    renderRecipe(currentRecipe);
+  } catch (err) {
+    recipeStatusEl.textContent = `エラー: ${err.message}`;
+    recipeViewEl.querySelectorAll('button, input').forEach((e) => {
+      e.disabled = false;
+    });
+  }
+}
+
+const CONFIDENCE_LABEL = { high: '', medium: '推定', low: '要確認' };
+
+function renderRecipe(doc) {
+  const r = doc.recipe;
+  recipeViewEl.replaceChildren();
+  if (doc.finalizedAt) {
+    recipeStatusEl.textContent = 'レシピを確定しました';
+  } else if (r.questions.length) {
+    recipeStatusEl.textContent = `確認したいことが ${r.questions.length} つあります`;
+  } else {
+    recipeStatusEl.textContent = '確認することはありません。よければ「これで完成」を押してください';
+  }
+
+  // 質問 (上に出して、すぐ答えられるように)
+  if (!doc.finalizedAt && r.questions.length) {
+    const qBox = el('div', 'questions');
+    const inputs = [];
+    for (const q of r.questions) {
+      const item = el('div', 'question');
+      item.append(el('p', 'question-text', q.question));
+      const row = el('div', 'question-row');
+      const input = el('input', 'question-input');
+      input.type = 'text';
+      input.placeholder = q.suggestion ? `例: ${q.suggestion}` : '回答';
+      row.append(input);
+      if (q.suggestion) {
+        const yes = el('button', 'btn btn-small', 'それでOK');
+        yes.addEventListener('click', () => {
+          input.value = `はい、${q.suggestion}で合っています`;
+        });
+        row.append(yes);
+      }
+      item.append(row);
+      qBox.append(item);
+      inputs.push({ q, input });
+    }
+    const send = el('button', 'btn btn-secondary', '回答を送る');
+    send.addEventListener('click', () => {
+      const answers = inputs
+        .map(({ q, input }) => ({ question: q.question, answer: input.value }))
+        .filter((a) => a.answer.trim());
+      if (!answers.length) return;
+      runRecipeAction('回答をレシピに反映しています…', () =>
+        postJson(`/api/recipes/${doc.id}/answers`, { answers })
+      );
+    });
+    qBox.append(send);
+    recipeViewEl.append(qBox);
+  }
+
+  // レシピ本体
+  const card = el('div', 'recipe-card');
+  card.append(el('h3', 'recipe-title', r.title));
+  if (r.servings) card.append(el('p', 'recipe-meta', `${r.servings}`));
+  if (r.summary) card.append(el('p', 'recipe-summary', r.summary));
+
+  card.append(el('h4', null, '材料'));
+  const ul = el('ul', 'ingredients');
+  for (const ing of r.ingredients) {
+    const li = el('li');
+    li.append(el('span', 'ing-name', ing.name));
+    const amount = el('span', 'ing-amount');
+    if (ing.original) amount.append(el('span', 'ing-original', `「${ing.original}」`));
+    if (ing.estimate) amount.append(el('span', null, ` ${ing.estimate}`));
+    const label = CONFIDENCE_LABEL[ing.confidence];
+    if (label) amount.append(el('span', `badge badge-${ing.confidence}`, label));
+    li.append(amount);
+    if (ing.note) li.append(el('span', 'ing-note', ing.note));
+    ul.append(li);
+  }
+  card.append(ul);
+
+  card.append(el('h4', null, '作り方'));
+  const ol = el('ol', 'steps');
+  for (const st of r.steps) {
+    const li = el('li');
+    li.append(el('span', null, st.text));
+    const meta = [st.heat, st.time].filter(Boolean).join(' / ');
+    if (meta) li.append(el('span', 'step-meta', meta));
+    if (st.tip) li.append(el('span', 'step-tip', `コツ: ${st.tip}`));
+    ol.append(li);
+  }
+  card.append(ol);
+
+  if (r.tips.length) {
+    card.append(el('h4', null, 'コツ・隠し味'));
+    const tl = el('ul', 'tips');
+    for (const t of r.tips) tl.append(el('li', null, t));
+    card.append(tl);
+  }
+  recipeViewEl.append(card);
+
+  if (!doc.finalizedAt) {
+    const fin = el('button', 'btn btn-start', 'これで完成');
+    fin.addEventListener('click', () =>
+      runRecipeAction('確定しています…', () => postJson(`/api/recipes/${doc.id}/finalize`))
+    );
+    recipeViewEl.append(fin);
+  }
+}
+
+recipeBtn.addEventListener('click', () => {
+  if (!lastSession) return;
+  recipeBtn.disabled = true;
+  runRecipeAction('レシピにまとめています… (数十秒かかることがあります)', () =>
+    postJson(`/api/sessions/${lastSession.sessionId}/recipe`)
+  ).finally(() => {
+    recipeBtn.disabled = !!currentRecipe;
+  });
+});
+
 function finishUI() {
+  releaseWakeLock();
   setStatus('停止しました', false);
   startBtn.disabled = false;
   stopBtn.disabled = true;
 }
 
+copyBtn.addEventListener('click', async () => {
+  if (!lastText) return;
+  try {
+    await navigator.clipboard.writeText(lastText);
+    copyBtn.textContent = 'コピーしました';
+  } catch (_) {
+    copyBtn.textContent = 'コピーできませんでした';
+  }
+  setTimeout(() => {
+    copyBtn.textContent = 'テキストをコピー';
+  }, 1500);
+});
+
 downloadBtn.addEventListener('click', () => {
   if (!lastSession) return;
-  const blob = new Blob([JSON.stringify(lastSession, null, 2)], {
-    type: 'application/json',
-  });
+  const blob = new Blob([lastText], { type: 'text/plain;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `transcript_${lastSession.sessionId}.json`;
+  a.download = `transcript_${lastSession.sessionId}.txt`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

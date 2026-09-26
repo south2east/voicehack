@@ -25,6 +25,15 @@
       <div id="partialText" class="partial-text" aria-live="polite"></div>
     </section>
 
+    <section class="recipe-area">
+      <div class="result-header">
+        <h2>レシピ</h2>
+        <button id="recipeBtn" class="btn btn-secondary" disabled>レシピにまとめる</button>
+      </div>
+      <p id="recipeStatus" class="analysis-status">話し終えて「終了」を押すと、レシピにまとめられます</p>
+      <div id="recipeView"></div>
+    </section>
+
     <section class="analysis-area">
       <h2>音声解析</h2>
       <p id="analysisStatus" class="analysis-status">終了すると録音を解析します</p>
@@ -34,13 +43,14 @@
 
     <section class="result-area">
       <div class="result-header">
-        <h2>セッション結果 (JSON)</h2>
+        <h2>セッション結果 (テキスト)</h2>
         <div class="result-actions">
           <a id="audioDownload" class="btn btn-secondary btn-link is-disabled" href="#" download>音声(MP4)をダウンロード</a>
-          <button id="downloadBtn" class="btn btn-secondary" disabled>JSONをダウンロード</button>
+          <button id="copyBtn" class="btn btn-secondary" disabled>テキストをコピー</button>
+          <button id="downloadBtn" class="btn btn-secondary" disabled>テキストをダウンロード</button>
         </div>
       </div>
-      <pre id="jsonOutput" class="json-output">まだセッションがありません</pre>
+      <pre id="textOutput" class="text-output">まだセッションがありません</pre>
     </section>
   </main>
 

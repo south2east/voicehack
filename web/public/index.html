@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>おふくろの味 — 聞き取り</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="app-header">
+      <div>
+        <h1>おふくろの味</h1>
+        <p class="subtitle">料理しながら話すだけで、レシピになります</p>
+      </div>
+      <a class="book-link" href="book/">レシピ一覧 →</a>
+    </header>
+
+    <section class="controls">
+      <button id="startBtn" class="btn btn-start">● 話しはじめる</button>
+      <button id="stopBtn" class="btn btn-stop" disabled>■ 作り終わった</button>
+      <span id="status" class="status">「話しはじめる」を押して、作りながら話してください</span>
+    </section>
+
+    <details class="panel sample" open>
+      <summary>お試し用の台本 (サンプル: 卵焼き・約1分)</summary>
+      <p class="muted">
+        「話しはじめる」を押してから、上から順に読み上げてください。
+        <mark>色のついた言葉</mark>が感覚的な分量です。伸ばす長さを変えると、推定される量も変わります。
+      </p>
+      <ol id="sampleScript" class="sample-script"></ol>
+      <button id="sampleBtn" class="btn btn-small">声を出さずに、この台本で試す</button>
+    </details>
+
+    <section class="panel">
+      <h2>聞き取った内容</h2>
+      <div id="transcript" class="transcript" aria-live="polite"></div>
+      <p id="pending" class="pending" hidden>文字起こし中…</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <h2>レシピ</h2>
+        <button id="recipeBtn" class="btn btn-secondary" disabled>レシピにまとめる</button>
+      </div>
+      <p id="recipeStatus" class="muted">作り終わったら、ここにレシピがまとまります</p>
+      <div id="recipeView"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

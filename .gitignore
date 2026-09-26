@@ -9,6 +9,7 @@ service-account.json
 # ---- 1. リアルタイム文字起こしアプリ (Node.js) ----
 node_modules/
 transcripts/*.json
+transcripts/*.txt
 !transcripts/.gitkeep
 recordings/*.mp4
 recordings/*.wav
@@ -23,3 +24,7 @@ __pycache__/
 out/
 samples/*.wav
 samples/*.aiff
+
+# ---- 3. レシピ (家族のデータなので git に入れない) ----
+recipes/*.json
+.vercel

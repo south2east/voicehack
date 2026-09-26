@@ -6,6 +6,7 @@
 |---|---|---|---|
 | [1. リアルタイム文字起こしアプリ](#1-リアルタイム文字起こしアプリ-nodejs) | Node.js | `server.js`, `public/` | ブラウザのマイク入力を Google Cloud Speech-to-Text (Chirp 3) でストリーミング文字起こし. 録音を保存し, 終了後に 2. の解析ツールへ自動で渡す |
 | [2. 音声解析ツール](#2-音声解析ツール-python) | Python | `src/voicehack/`, `experiments/`, `tests/` | スペクトル・大きさ (LUFS)・声の高さ・話す速さの計測, 声と環境音の分離 |
+| [3. おふくろの味 (Vercel 版)](#3-おふくろの味-vercel-版) | Node.js | `web/` | 料理しながら話した声をレシピにまとめる Web アプリ。https://okaasan-recipe.vercel.app |
 | 調査ノート | — | `research_notes/`, `reports/` | 録音データのノイズ除去手法の調査 |
 
 どちらも設定はリポジトリ直下の **`.env`** (ひな形: `.env.example`) から読みます. `.env` は git 管理外です.
@@ -75,8 +76,9 @@ npm start
 ブラウザで `http://localhost:3000` を開き、「開始」ボタンでマイクの利用を許可すると
 録音・リアルタイム文字起こしが始まります。「終了」ボタンでセッションを終了すると:
 
-- 確定した文字起こし結果が `transcript_<sessionId>.json` として、録音が MP4 としてダウンロード可能になる
-- サーバー側にも `transcripts/<timestamp>_<sessionId>.json` として保存される
+- 文字起こし結果が LLM にそのまま貼り付けられるプレーンテキストで表示され、コピー / `.txt` ダウンロードできる
+  (本文 1 文 1 行 + 解析結果の要約。録音は MP4 でダウンロード可能)
+- サーバー側にも `transcripts/<timestamp>_<sessionId>.txt` (テキスト) と `.json` (全データ) として保存される
 - 録音の解析がバックグラウンドで始まり、完了すると「音声解析」欄に大きさ・トーン・スピード・環境音の
   数値と図が表示される (録音の長さと同程度の時間がかかる。解析は 1 件ずつ順番に実行)
 
@@ -326,3 +328,38 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 | Groq `whisper-large-v3-turbo` | `--asr groq` (クラウド API, 各自の API キーで利用) | Groq の利用規約に従う |
 | SepFormer (`speechbrain/sepformer-dns4-16k-enhancement`) | `--dnn` の音声強調 | Apache-2.0 |
 | UniDic (unidic-lite) | 読み仮名 → モーラ数 | BSD-3-Clause |
+
+---
+
+## 3. おふくろの味 (Vercel 版)
+
+お母さんが料理をしながら話した内容を聞き取り、LLM (`gpt-6-luna`) でレシピにまとめ、
+足りない分量や火加減を質問で確認して仕上げる Web アプリです。完成したレシピは一覧ページ (`/book/`) で見られます。
+
+- 公開 URL: https://okaasan-recipe.vercel.app (一覧: https://okaasan-recipe.vercel.app/book/)
+- 声が途切れたところで音声を区切って `/api/transcribe` (OpenAI の文字起こし) に送るので、
+  工程の間に長く黙っていても問題なく、無音の間は料金もかからない
+- 「作り終わった」で文字起こし (経過時間と無音の長さ付き) を LLM に渡し、レシピと質問を作る。
+  質問には文字・「〇〇でOK」・声で答えられる。「これで完成」で一覧に載る
+- システムプロンプト: `web/prompts/recipe_system.md` (手元のサーバー 1. のレシピ機能も同じものを使う)
+
+### 構成
+
+| 場所 | 内容 |
+|---|---|
+| `web/public/` | お母さん用の聞き取り画面 (`/`) と息子用の一覧 (`/book/`) |
+| `web/api/transcribe.js` | 音声 → テキスト (`OPENAI_TRANSCRIBE_MODEL`, 既定 `gpt-4o-transcribe`) |
+| `web/api/recipes/` | レシピの作成・取得・回答反映・確定 |
+| `web/lib/recipe.js` | レシピ化の中身 (スキーマ・プロンプト・LLM 呼び出し) |
+| `web/lib/store.js` | 保存先 (Vercel Blob, 非公開ストア `okaasan-recipes`) |
+
+### デプロイ
+
+```bash
+cd web
+vercel env add OPENAI_API_KEY production   # 初回だけ。キーは git に入れない
+vercel deploy --prod
+```
+
+Blob のトークン (`BLOB_READ_WRITE_TOKEN`) はストア作成時に Vercel の環境変数へ自動登録済みです。
+手元の 1. (Google のリアルタイム文字起こし・録音・音声解析) は Vercel では動かないため、この版には含めていません。

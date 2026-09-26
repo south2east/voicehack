@@ -11,6 +11,7 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const speech = require('@google-cloud/speech').v2;
 const ffmpegPath = require('ffmpeg-static');
+const recipes = require('./recipe');
 
 const PORT = process.env.PORT || 3000;
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT;
@@ -48,10 +49,34 @@ app.use('/analysis', express.static(ANALYSIS_DIR));
 // 終了したセッション (解析状況の問い合わせ用)。sessionId -> TranscriptionSession
 const finishedSessions = new Map();
 
+// ---- レシピ (LLM で精査 → 質問 → 回答で更新 → 確定) ----
+app.use(express.json());
+
+function recipeRoute(handler) {
+  return async (req, res) => {
+    try {
+      res.json(await handler(req));
+    } catch (err) {
+      console.error('[recipe]', err.message);
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  };
+}
+
+app.post('/api/sessions/:id/recipe', recipeRoute((req) => {
+  const session = finishedSessions.get(req.params.id);
+  if (!session) throw Object.assign(new Error('session not found'), { status: 404 });
+  return recipes.createFromSession(session.toJSON());
+}));
+app.get('/api/recipes', recipeRoute(() => recipes.list()));
+app.get('/api/recipes/:id', recipeRoute((req) => recipes.load(req.params.id)));
+app.post('/api/recipes/:id/answers', recipeRoute((req) => recipes.answer(req.params.id, req.body.answers || [])));
+app.post('/api/recipes/:id/finalize', recipeRoute((req) => recipes.finalize(req.params.id)));
+
 app.get('/api/sessions/:id', (req, res) => {
   const session = finishedSessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: 'session not found' });
-  res.json(session.toJSON());
+  res.json({ session: session.toJSON(), text: session.toText() });
 });
 
 const server = http.createServer(app);
@@ -60,6 +85,9 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 // Google の streamingRecognize は 1 ストリームあたり最大 ~5分の制約があるため、
 // 上限に達する前にストリームを作り直して継続させる
 const STREAM_RESTART_MS = 4 * 60 * 1000;
+
+// 「終了」後、Google から最後の確定結果が届くのを待つ上限
+const FINAL_RESULT_TIMEOUT_MS = 5000;
 
 // 解析は CPU を食うので 1 件ずつ順番に実行する
 let analysisQueue = Promise.resolve();
@@ -88,6 +116,14 @@ function buildStreamingConfig(sampleRateHertz, languageCode) {
   };
 }
 
+function formatJst(iso) {
+  return new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+}
+
+function fmtNum(v, digits) {
+  return v === null || v === undefined ? '—' : Number(v).toFixed(digits);
+}
+
 class TranscriptionSession {
   constructor(ws, { sampleRateHertz, languageCode }) {
     this.ws = ws;
@@ -104,6 +140,7 @@ class TranscriptionSession {
     this.restartTimer = null;
     this.closed = false;
     this.pendingAudio = [];
+    this.lastPartial = ''; // まだ確定していない途中結果 (終了時に確定しなかった分の救済用)
     this.ffmpegProcess = null;
     this.audioFileName = null;
     this.wavFileName = null;
@@ -212,6 +249,14 @@ class TranscriptionSession {
 
   _handleResponse(response) {
     const results = response.results || [];
+    const partials = results
+      .filter((r) => !r.isFinal && r.alternatives && r.alternatives[0])
+      .map((r) => r.alternatives[0].transcript || '');
+    if (partials.length) {
+      this.lastPartial = partials.join('');
+    } else if (results.some((r) => r.isFinal)) {
+      this.lastPartial = '';
+    }
     for (const result of results) {
       const alt = result.alternatives && result.alternatives[0];
       if (!alt) continue;
@@ -261,15 +306,8 @@ class TranscriptionSession {
     if (this.closed) return this._cachedRecord || this.toJSON();
     this.closed = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
-    if (this.geminiStream) {
-      try {
-        this.geminiStream.end();
-      } catch (_) {
-        /* noop */
-      }
-    }
-    await this._stopRecording();
     this.endedAt = new Date().toISOString();
+    await Promise.all([this._endRecognition(), this._stopRecording()]);
     finishedSessions.set(this.id, this);
     this._startAnalysis();
     const record = this.toJSON();
@@ -350,6 +388,42 @@ class TranscriptionSession {
     this._persist(record);
   }
 
+  // 音声の送信を締めて、Google から残りの確定結果が届き終わるまで待つ。
+  // これを待たずにまとめると、終了直前の発話が結果から抜け落ちる。
+  _endRecognition() {
+    const stream = this.geminiStream;
+    return new Promise((resolve) => {
+      if (!stream) return resolve();
+      let timer = null;
+      const done = () => {
+        clearTimeout(timer);
+        // 最後まで確定しなかった途中結果も捨てずに残す
+        if (this.lastPartial.trim()) {
+          this.segments.push({
+            text: this.lastPartial,
+            confidence: null,
+            receivedAt: new Date().toISOString(),
+            unconfirmed: true,
+          });
+          this.lastPartial = '';
+        }
+        resolve();
+      };
+      timer = setTimeout(() => {
+        console.warn(`[session ${this.id}] final result wait timed out`);
+        done();
+      }, FINAL_RESULT_TIMEOUT_MS);
+      stream.once('end', done);
+      stream.once('close', done);
+      stream.once('error', done);
+      try {
+        stream.end();
+      } catch (_) {
+        done();
+      }
+    });
+  }
+
   // ffmpegへの入力を締めて、MP4への書き出しが完了するまで待つ
   _stopRecording() {
     return new Promise((resolve) => {
@@ -395,15 +469,62 @@ class TranscriptionSession {
     };
   }
 
+  // LLM にそのまま貼り付けて渡せる形のプレーンテキスト (本文 + 解析結果の要約)
+  toText() {
+    const lines = [
+      '# 文字起こし',
+      '',
+      '※ 以下は音声を自動で文字起こしした結果です。聞き取り誤りや漢字の誤変換を含むことがあるので、',
+      '  不自然な語は文脈から本来の言葉を推測して読んでください。',
+      '',
+    ];
+    lines.push(`日時: ${formatJst(this.startedAt)}`);
+    if (this.endedAt) {
+      const sec = (Date.parse(this.endedAt) - Date.parse(this.startedAt)) / 1000;
+      lines.push(`長さ: ${sec.toFixed(1)} 秒`);
+    }
+    lines.push(`言語: ${this.languageCode} / 認識モデル: Google Cloud Speech-to-Text ${MODEL}`);
+    lines.push('', '## 本文', '');
+    if (this.segments.length) {
+      for (const seg of this.segments) {
+        lines.push(seg.unconfirmed ? `${seg.text.trim()} (未確定)` : seg.text.trim());
+      }
+    } else {
+      lines.push('(認識されたテキストはありません)');
+    }
+
+    const a = this.analysis;
+    if (a.status === 'done' && a.report) {
+      const r = a.report;
+      const p = r.pitch;
+      lines.push('', '## 声の解析', '');
+      lines.push(`- 大きさ: ${fmtNum(r.loudness.integrated_lufs, 1)} LUFS (ピーク ${fmtNum(r.level.peak_dbfs, 1)} dBFS)`);
+      lines.push(p.median_f0_hz
+        ? `- 声の高さ: 中央値 ${fmtNum(p.median_f0_hz, 0)} Hz (${p.note}), 抑揚の幅 ${fmtNum(p.f0_range_semitones, 1)} 半音`
+        : '- 声の高さ: 有声区間なし');
+      lines.push(`- 話す速さ: 発話速度 ${fmtNum(r.rate.speech_rate_syll_per_s, 2)} 音節/秒, ` +
+        `調音速度 ${fmtNum(r.rate.articulation_rate_syll_per_s, 2)} 音節/秒, ポーズ ${r.rate.n_pauses} 回`);
+      if (r.separation) {
+        lines.push(`- 環境音: ${fmtNum(r.separation.environment.integrated_lufs, 1)} LUFS`);
+      }
+    } else if (a.status === 'running') {
+      lines.push('', '## 声の解析', '', '(解析中)');
+    }
+    return lines.join('\n') + '\n';
+  }
+
   _persist(record) {
-    const filename = `${this.baseName}.json`;
-    const filePath = path.join(TRANSCRIPTS_DIR, filename);
-    fs.writeFile(filePath, JSON.stringify(record, null, 2), (err) => {
+    const jsonPath = path.join(TRANSCRIPTS_DIR, `${this.baseName}.json`);
+    const textPath = path.join(TRANSCRIPTS_DIR, `${this.baseName}.txt`);
+    fs.writeFile(jsonPath, JSON.stringify(record, null, 2), (err) => {
       if (err) {
         console.error(`[session ${this.id}] failed to persist transcript:`, err.message);
       } else {
-        console.log(`[session ${this.id}] transcript saved -> ${filePath}`);
+        console.log(`[session ${this.id}] transcript saved -> ${jsonPath}`);
       }
+    });
+    fs.writeFile(textPath, this.toText(), (err) => {
+      if (err) console.error(`[session ${this.id}] failed to persist text:`, err.message);
     });
   }
 }
@@ -437,7 +558,7 @@ wss.on('connection', (ws) => {
         const current = session;
         session = null;
         current.finish().then((record) => {
-          current._safeSend({ type: 'stopped', session: record });
+          current._safeSend({ type: 'stopped', session: record, text: current.toText() });
         });
       }
     }

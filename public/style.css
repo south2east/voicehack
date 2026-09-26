@@ -86,6 +86,7 @@ header h1 {
 }
 
 .transcript-area,
+.recipe-area,
 .analysis-area,
 .result-area {
   background: var(--panel);
@@ -96,6 +97,7 @@ header h1 {
 }
 
 .transcript-area h2,
+.recipe-area h2,
 .analysis-area h2,
 .result-area h2 {
   margin: 0 0 10px;
@@ -141,7 +143,7 @@ header h1 {
   pointer-events: none;
 }
 
-.json-output {
+.text-output {
   background: #0b0d12;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -186,4 +188,127 @@ header h1 {
 
 .analysis-images a {
   color: var(--accent);
+}
+
+/* ---- レシピ ---- */
+.questions {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+
+.question-text {
+  margin: 0 0 6px;
+  line-height: 1.6;
+}
+
+.question-row {
+  display: flex;
+  gap: 8px;
+}
+
+.question-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px;
+  font-size: 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
+.btn-small {
+  padding: 8px 12px;
+  font-size: 0.85rem;
+  background: var(--border);
+  color: var(--text);
+}
+
+.recipe-card {
+  margin-bottom: 16px;
+  line-height: 1.7;
+}
+
+.recipe-title {
+  margin: 0 0 4px;
+  font-size: 1.3rem;
+}
+
+.recipe-meta,
+.recipe-summary {
+  margin: 0 0 8px;
+  color: var(--muted);
+}
+
+.recipe-card h4 {
+  margin: 16px 0 6px;
+}
+
+.ingredients,
+.steps,
+.tips {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
+.ingredients li,
+.steps li {
+  margin-bottom: 6px;
+}
+
+.ing-name {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
+.ing-original {
+  color: var(--muted);
+}
+
+.ing-note,
+.step-meta,
+.step-tip {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.badge {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.badge-medium {
+  background: #3b3f4a;
+}
+
+.badge-low {
+  background: #7c2d12;
+}
+
+/* ---- スマホ ---- */
+@media (max-width: 480px) {
+  .app {
+    padding: 20px 14px 60px;
+  }
+
+  .controls {
+    flex-wrap: wrap;
+  }
+
+  .controls .btn {
+    flex: 1;
+    padding: 16px;
+    font-size: 1.1rem;
+  }
+
+  .status {
+    width: 100%;
+  }
 }
