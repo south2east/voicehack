@@ -232,3 +232,42 @@ def test_near_field_filter_drops_far_quiet_voice():
     assert np.sum(on.speech[near] ** 2) > 0.8 * np.sum(x[near] ** 2)
     assert np.sum(off.speech[fars] ** 2) > 0.5 * np.sum(x[fars] ** 2)   # 無効なら残る
     assert np.sum(on.speech[fars] ** 2) < 0.01 * np.sum(x[fars] ** 2)   # 有効なら落ちる
+
+
+def test_groq_backend_requests(monkeypatch):
+    """Groq API への要求形式・キーの扱い・再試行を, 通信をモックして確認 (実際には送信しない)."""
+    import io
+    import json
+    import urllib.error
+
+    import voicehack.groq_asr as g
+
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    with pytest.raises(g.GroqError, match="GROQ_API_KEY"):
+        g.transcribe_segments([np.zeros(SR)], SR)
+
+    monkeypatch.setenv("GROQ_API_KEY", "gsk_test_dummy")
+    sent = []
+
+    class Resp(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake_urlopen(req, timeout):
+        sent.append(req)
+        if len(sent) == 1:   # 1 回目はレート制限 → 再試行されること
+            raise urllib.error.HTTPError(req.full_url, 429, "rate", {"retry-after": "0"}, io.BytesIO(b""))
+        return Resp(json.dumps({"text": " こんにちは "}).encode())
+
+    monkeypatch.setattr(g.urllib.request, "urlopen", fake_urlopen)
+    out = g.transcribe_segments([0.1 * np.sin(np.arange(SR) * 0.1)], SR)
+    assert out == ["こんにちは"]
+    req = sent[-1]
+    assert req.full_url == g.URL
+    assert req.get_header("Authorization") == "Bearer gsk_test_dummy"
+    body = req.data
+    assert b'name="model"' in body and g.DEFAULT_MODEL.encode() in body
+    assert b'name="language"\r\n\r\nja' in body and b"fLaC" in body

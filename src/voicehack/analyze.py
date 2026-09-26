@@ -18,7 +18,7 @@ from .spectral import octave_bands, spectral_features, spectrum, stft
 
 
 def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
-            asr: bool = False, dnn: bool = False,
+            asr: bool | str = False, dnn: bool = False,
             near_field_db: float | None = 15.0) -> dict:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -73,7 +73,8 @@ def analyze(audio: Audio, out_dir: str | Path, separate_noise: bool = True,
     if asr:
         from .asr import mora_rate
 
-        summary["rate"]["asr"] = mora_rate(voice, sr, asr_input=x)
+        backend = "local" if asr is True else str(asr)
+        summary["rate"]["asr"] = mora_rate(voice, sr, asr_input=x, backend=backend)
     if sep is not None:
         summary["separation"] = {
             "method": "SepFormer (DNS4) + voice-region gate" if dnn else

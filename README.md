@@ -30,6 +30,7 @@ uv run voicehack analyze voice.wav -o out/test --sr 16000
 uv run voicehack analyze voice.wav --no-separate      # ノイズ分離なし
 uv run voicehack analyze voice.wav --asr              # 音声認識でモーラ速度も (要: uv sync --extra asr,
                                                       #  初回に Whisper small 約 480 MB をダウンロード)
+uv run voicehack analyze voice.wav --asr groq         # 文字起こしを Groq Cloud で (高速・高精度, 音声を外部送信)
 uv run voicehack analyze voice.wav --dnn              # 声と重なった物音も分離 (要: uv sync --extra dnn,
                                                       #  torch 等 約 600 MB + 初回にモデル約 110 MB)
 
@@ -53,6 +54,29 @@ separation.png   原音・音声・環境音のスペクトログラムと分離
 speech.wav       分離した音声
 environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻る)
 ```
+
+## Groq API キーの設定 (`--asr groq` を使う場合のみ)
+
+`--asr groq` は発話ごとの音声を Groq Cloud (`whisper-large-v3-turbo`) に送って文字起こしします.
+**録音した音声が Mac の外に送信されます.** `--asr` (ローカル) では送信されません.
+
+API キーは **リポジトリにも `~/.zshrc` にも平文で書かず**, macOS のキーチェーンに保存します.
+こうすると dotfiles やこのリポジトリを GitHub に公開してもキーは漏れません.
+
+```bash
+# 1. キーチェーンに保存 (キーは対話入力. コマンド履歴に残らない)
+security add-generic-password -a "$USER" -s GROQ_API_KEY -w
+
+# 2. ~/.zshrc に「キーチェーンから読み込む」行を追加 (キー自体は書かない)
+echo 'export GROQ_API_KEY="$(security find-generic-password -a "$USER" -s GROQ_API_KEY -w 2>/dev/null)"' >> ~/.zshrc
+source ~/.zshrc
+
+# 確認 (キーの中身は表示しない)
+[ -n "$GROQ_API_KEY" ] && echo "set" || echo "not set"
+```
+
+キーを変えるときは `security delete-generic-password -a "$USER" -s GROQ_API_KEY` の後に 1 をやり直します.
+リポジトリの `.gitignore` は `.env` / `.env.*` / `*.key` を除外しています.
 
 ## 検証 (`uv run pytest`)
 

@@ -109,20 +109,33 @@ def active_intervals(x: np.ndarray, sr: int, min_pause_s: float = 0.3,
 
 
 def transcribe(x: np.ndarray, sr: int, model: str = "small",
-               split_pause_s: float = 0.5, asr_input: np.ndarray | None = None) -> list[Utterance]:
-    """x (分離後の音声) で発話区間を検出し, asr_input (元の入力; 既定は x) を認識する."""
+               split_pause_s: float = 0.5, asr_input: np.ndarray | None = None,
+               backend: str = "local") -> list[Utterance]:
+    """x (分離後の音声) で発話区間を検出し, asr_input (元の入力; 既定は x) を認識する.
+    backend: "local" (faster-whisper, Mac 内で完結) / "groq" (Groq Cloud に音声を送信)."""
     src = x if asr_input is None else asr_input
     if sr != 16000:
         from .audio_io import resample
 
         x, src, sr = resample(x, sr, 16000), resample(src, sr, 16000), 16000
-    m = _model(model)
+    spans = active_intervals(x, sr, min_pause_s=split_pause_s)
+    segs = [src[max(0, int((a - 0.2) * sr)): int((b + 0.2) * sr)].astype(np.float32)
+            for a, b in spans]
+    if backend == "groq":
+        from .groq_asr import DEFAULT_MODEL, transcribe_segments
+
+        texts = transcribe_segments(segs, sr, model=DEFAULT_MODEL if model == "small" else model)
+    elif backend == "local":
+        m = _model(model)
+        texts = ["".join(s.text for s in m.transcribe(seg, language="ja", beam_size=5,
+                                                       condition_on_previous_text=False,
+                                                       vad_filter=False)[0])
+                 for seg in segs]
+    else:
+        raise ValueError(f"unknown ASR backend: {backend}")
     utts = []
-    for a, b in active_intervals(x, sr, min_pause_s=split_pause_s):
-        seg = src[max(0, int((a - 0.2) * sr)): int((b + 0.2) * sr)].astype(np.float32)
-        segs, _ = m.transcribe(seg, language="ja", beam_size=5,
-                               condition_on_previous_text=False, vad_filter=False)
-        text = "".join(s.text for s in segs).strip()
+    for (a, b), text in zip(spans, texts):
+        text = text.strip()
         if not text:
             continue
         kana = to_kana(text)
@@ -131,8 +144,8 @@ def transcribe(x: np.ndarray, sr: int, model: str = "small",
 
 
 def mora_rate(x: np.ndarray, sr: int, model: str = "small",
-              asr_input: np.ndarray | None = None) -> dict:
-    utts = transcribe(x, sr, model, asr_input=asr_input)
+              asr_input: np.ndarray | None = None, backend: str = "local") -> dict:
+    utts = transcribe(x, sr, model, asr_input=asr_input, backend=backend)
     morae = sum(u.morae for u in utts)
     if not utts:
         return {"morae": 0, "speech_rate_mora_per_s": None,
@@ -142,6 +155,7 @@ def mora_rate(x: np.ndarray, sr: int, model: str = "small",
     phon = sum(b - a for a, b in active_intervals(x, sr)
                if b > utts[0].start and a < utts[-1].end)
     return {
+        "backend": backend,
         "morae": morae,
         "speech_rate_mora_per_s": morae / span if span > 0 else None,
         "articulation_rate_mora_per_s": morae / phon if phon > 0 else None,

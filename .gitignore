@@ -5,3 +5,8 @@ __pycache__/
 out/
 samples/*.wav
 samples/*.aiff
+
+# 秘密情報 (API キーなど) は置かない. 念のため除外
+.env
+.env.*
+*.key
