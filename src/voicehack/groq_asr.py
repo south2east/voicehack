@@ -1,7 +1,7 @@
 """Groq Cloud の Whisper API による文字起こし (`--asr groq`).
 
-音声は Groq のサーバーへ送信される. API キーは環境変数 GROQ_API_KEY からのみ読み,
-コードやリポジトリには置かない (README の「Groq API キーの設定」参照).
+音声は Groq のサーバーへ送信される. API キーは環境変数 GROQ_API_KEY か macOS キーチェーン
+からだけ読み, コードやリポジトリには置かない (README の「Groq API キーの設定」参照).
 API は OpenAI 互換の POST /openai/v1/audio/transcriptions で, 追加パッケージは使わない.
 """
 
@@ -27,10 +27,33 @@ class GroqError(RuntimeError):
     pass
 
 
+KEYCHAIN_SERVICE = "GROQ_API_KEY"
+
+
+def _from_keychain() -> str:
+    """macOS キーチェーン (サービス名 GROQ_API_KEY, アカウント = ログインユーザ) から読む.
+    キーを環境変数に常駐させずに済むので, 他のプログラムから見えない."""
+    import getpass
+    import subprocess
+    import sys
+
+    if sys.platform != "darwin":
+        return ""
+    try:
+        r = subprocess.run(["security", "find-generic-password", "-a", getpass.getuser(),
+                            "-s", KEYCHAIN_SERVICE, "-w"], capture_output=True, text=True,
+                           timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return r.stdout.strip() if r.returncode == 0 else ""
+
+
 def api_key() -> str:
-    key = os.environ.get("GROQ_API_KEY", "").strip()
+    """環境変数 GROQ_API_KEY → なければ macOS キーチェーンの順で探す."""
+    key = os.environ.get("GROQ_API_KEY", "").strip() or _from_keychain()
     if not key:
-        raise GroqError("環境変数 GROQ_API_KEY が設定されていません (README の「Groq API キーの設定」参照)")
+        raise GroqError("Groq の API キーが見つかりません. キーチェーンに保存してください "
+                        "(README の「Groq API キーの設定」参照)")
     return key
 
 

@@ -60,22 +60,21 @@ environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻�
 `--asr groq` は発話ごとの音声を Groq Cloud (`whisper-large-v3-turbo`) に送って文字起こしします.
 **録音した音声が Mac の外に送信されます.** `--asr` (ローカル) では送信されません.
 
-API キーは **リポジトリにも `~/.zshrc` にも平文で書かず**, macOS のキーチェーンに保存します.
-こうすると dotfiles やこのリポジトリを GitHub に公開してもキーは漏れません.
+API キーは **macOS のキーチェーンに保存** し, voicehack が使う瞬間にだけ読み出します.
+リポジトリにも `~/.zshrc` にも書かないので, どちらを GitHub に公開してもキーは漏れません.
 
 ```bash
-# 1. キーチェーンに保存 (キーは対話入力. コマンド履歴に残らない)
+# キーチェーンに保存 (キーは対話入力. コマンド履歴に残らない)
 security add-generic-password -a "$USER" -s GROQ_API_KEY -w
 
-# 2. ~/.zshrc に「キーチェーンから読み込む」行を追加 (キー自体は書かない)
-echo 'export GROQ_API_KEY="$(security find-generic-password -a "$USER" -s GROQ_API_KEY -w 2>/dev/null)"' >> ~/.zshrc
-source ~/.zshrc
+# 保存できたか確認 (キーの中身は表示しない)
+security find-generic-password -a "$USER" -s GROQ_API_KEY >/dev/null && echo "saved"
 
-# 確認 (キーの中身は表示しない)
-[ -n "$GROQ_API_KEY" ] && echo "set" || echo "not set"
+# 削除 (キーを変えるときは削除してから保存し直す)
+security delete-generic-password -a "$USER" -s GROQ_API_KEY
 ```
 
-キーを変えるときは `security delete-generic-password -a "$USER" -s GROQ_API_KEY` の後に 1 をやり直します.
+環境変数 `GROQ_API_KEY` が設定されていればそちらを優先します (CI など macOS 以外向け).
 リポジトリの `.gitignore` は `.env` / `.env.*` / `*.key` を除外しています.
 
 ## 検証 (`uv run pytest`)

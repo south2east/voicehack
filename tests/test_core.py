@@ -243,8 +243,11 @@ def test_groq_backend_requests(monkeypatch):
     import voicehack.groq_asr as g
 
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    with pytest.raises(g.GroqError, match="GROQ_API_KEY"):
+    monkeypatch.setattr(g, "_from_keychain", lambda: "")
+    with pytest.raises(g.GroqError, match="API キーが見つかりません"):
         g.transcribe_segments([np.zeros(SR)], SR)
+    monkeypatch.setattr(g, "_from_keychain", lambda: "gsk_from_keychain")
+    assert g.api_key() == "gsk_from_keychain"
 
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test_dummy")
     sent = []
