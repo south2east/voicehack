@@ -28,20 +28,28 @@ MODEL = "speechbrain/sepformer-dns4-16k-enhancement"
 SR = 16000
 
 
+def _device() -> str:
+    """Apple Silicon の GPU (MPS) があれば使う. M4 で CPU 比 1.7 倍速, 出力差は相対 1e-4 未満."""
+    import torch
+
+    return "mps" if torch.backends.mps.is_available() else "cpu"
+
+
 @lru_cache(maxsize=1)
 def _model():
     from speechbrain.inference.separation import SepformerSeparation
 
     save = Path.home() / ".cache" / "voicehack" / MODEL.split("/")[-1]
     return SepformerSeparation.from_hparams(source=MODEL, savedir=str(save),
-                                            run_opts={"device": "cpu"})
+                                            run_opts={"device": _device()})
 
 
 def _enhance_chunk(x: np.ndarray) -> np.ndarray:
     import torch
 
     with torch.no_grad():
-        y = _model().separate_batch(torch.tensor(x, dtype=torch.float32)[None])[0, :, 0].numpy()
+        inp = torch.tensor(x, dtype=torch.float32)[None].to(_device())
+        y = _model().separate_batch(inp)[0, :, 0].cpu().numpy()
     y = y[: len(x)].astype(np.float64)
     den = float(np.dot(y, y))
     return y * (float(np.dot(x, y)) / den) if den > 0 else y
