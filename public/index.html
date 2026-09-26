@@ -28,7 +28,10 @@
     <section class="result-area">
       <div class="result-header">
         <h2>セッション結果 (JSON)</h2>
-        <button id="downloadBtn" class="btn btn-secondary" disabled>JSONをダウンロード</button>
+        <div class="result-actions">
+          <a id="audioDownload" class="btn btn-secondary btn-link is-disabled" href="#" download>音声(MP4)をダウンロード</a>
+          <button id="downloadBtn" class="btn btn-secondary" disabled>JSONをダウンロード</button>
+        </div>
       </div>
       <pre id="jsonOutput" class="json-output">まだセッションがありません</pre>
     </section>

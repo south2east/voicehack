@@ -6,9 +6,11 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const express = require('express');
 const { WebSocketServer } = require('ws');
 const speech = require('@google-cloud/speech').v2;
+const ffmpegPath = require('ffmpeg-static');
 
 const PORT = process.env.PORT || 3000;
 const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT;
@@ -16,9 +18,12 @@ const LOCATION = process.env.GOOGLE_CLOUD_LOCATION || 'us-central1';
 const MODEL = process.env.SPEECH_MODEL || 'chirp_3';
 const DEFAULT_LANGUAGE = process.env.SPEECH_LANGUAGE || 'ja-JP';
 const TRANSCRIPTS_DIR = path.join(__dirname, 'transcripts');
+const RECORDINGS_DIR = path.join(__dirname, 'recordings');
 
-if (!fs.existsSync(TRANSCRIPTS_DIR)) {
-  fs.mkdirSync(TRANSCRIPTS_DIR, { recursive: true });
+for (const dir of [TRANSCRIPTS_DIR, RECORDINGS_DIR]) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 }
 
 if (!PROJECT_ID) {
@@ -29,6 +34,7 @@ if (!PROJECT_ID) {
 
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/recordings', express.static(RECORDINGS_DIR));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -77,10 +83,55 @@ class TranscriptionSession {
     this.restartTimer = null;
     this.closed = false;
     this.pendingAudio = [];
+    this.ffmpegProcess = null;
+    this.audioFileName = null;
+    this.recordingFailed = false;
   }
 
   start() {
     this._openStream();
+    this._startRecording();
+  }
+
+  // 開始〜終了の間に受け取った生音声(PCM16)を、ffmpeg-static (npm同梱バイナリ) で
+  // そのままMP4(AAC)へエンコードしながら保存する。ユーザー側でffmpegを別途
+  // インストールする必要はない。
+  _startRecording() {
+    if (!ffmpegPath) {
+      console.warn(`[session ${this.id}] ffmpeg-static のバイナリが見つからず、録音保存をスキップします`);
+      this.recordingFailed = true;
+      return;
+    }
+    const filename = `${this.startedAt.replace(/[:.]/g, '-')}_${this.id}.mp4`;
+    const outputPath = path.join(RECORDINGS_DIR, filename);
+
+    const proc = spawn(ffmpegPath, [
+      '-hide_banner',
+      '-loglevel', 'error',
+      '-f', 's16le',
+      '-ar', String(this.sampleRateHertz),
+      '-ac', '1',
+      '-i', 'pipe:0',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+      '-y',
+      outputPath,
+    ]);
+
+    proc.stdin.on('error', () => {
+      /* stdinへの書き込みエラーはprocess終了時によく起きるため無視 */
+    });
+    proc.stderr.on('data', (d) => {
+      console.error(`[session ${this.id}] ffmpeg:`, d.toString().trim());
+    });
+    proc.on('error', (err) => {
+      console.error(`[session ${this.id}] ffmpeg spawn error:`, err.message);
+      this.recordingFailed = true;
+    });
+
+    this.ffmpegProcess = proc;
+    this.audioFileName = filename;
   }
 
   _openStream() {
@@ -149,11 +200,20 @@ class TranscriptionSession {
   }
 
   writeAudio(chunk) {
-    if (this.closed || !this.geminiStream) return;
-    try {
-      this.geminiStream.write({ audio: chunk });
-    } catch (err) {
-      console.error(`[session ${this.id}] write error:`, err.message);
+    if (this.closed) return;
+    if (this.geminiStream) {
+      try {
+        this.geminiStream.write({ audio: chunk });
+      } catch (err) {
+        console.error(`[session ${this.id}] write error:`, err.message);
+      }
+    }
+    if (this.ffmpegProcess && this.ffmpegProcess.stdin.writable) {
+      try {
+        this.ffmpegProcess.stdin.write(chunk);
+      } catch (err) {
+        console.error(`[session ${this.id}] ffmpeg write error:`, err.message);
+      }
     }
   }
 
@@ -163,8 +223,8 @@ class TranscriptionSession {
     }
   }
 
-  finish() {
-    if (this.closed) return this.toJSON();
+  async finish() {
+    if (this.closed) return this._cachedRecord || this.toJSON();
     this.closed = true;
     if (this.restartTimer) clearTimeout(this.restartTimer);
     if (this.geminiStream) {
@@ -174,13 +234,44 @@ class TranscriptionSession {
         /* noop */
       }
     }
+    await this._stopRecording();
     this.endedAt = new Date().toISOString();
     const record = this.toJSON();
+    this._cachedRecord = record;
     this._persist(record);
     return record;
   }
 
+  // ffmpegへの入力を締めて、MP4への書き出しが完了するまで待つ
+  _stopRecording() {
+    return new Promise((resolve) => {
+      const proc = this.ffmpegProcess;
+      if (!proc) return resolve();
+
+      proc.once('close', (code) => {
+        if (code !== 0) {
+          console.error(`[session ${this.id}] ffmpeg exited with code ${code}`);
+          this.recordingFailed = true;
+        } else {
+          console.log(`[session ${this.id}] recording saved -> ${path.join(RECORDINGS_DIR, this.audioFileName)}`);
+        }
+        resolve();
+      });
+      proc.once('error', () => {
+        this.recordingFailed = true;
+        resolve();
+      });
+      try {
+        proc.stdin.end();
+      } catch (_) {
+        this.recordingFailed = true;
+        resolve();
+      }
+    });
+  }
+
   toJSON() {
+    const hasAudio = this.audioFileName && !this.recordingFailed;
     return {
       sessionId: this.id,
       languageCode: this.languageCode,
@@ -189,6 +280,8 @@ class TranscriptionSession {
       endedAt: this.endedAt,
       segments: this.segments,
       fullText: this.segments.map((s) => s.text).join(''),
+      audioFile: hasAudio ? this.audioFileName : null,
+      audioUrl: hasAudio ? `/recordings/${this.audioFileName}` : null,
     };
   }
 
@@ -222,7 +315,7 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === 'start') {
-      if (session) session.finish();
+      if (session) session.finish().catch(() => {});
       session = new TranscriptionSession(ws, {
         sampleRateHertz: msg.sampleRate || 48000,
         languageCode: msg.languageCode,
@@ -231,15 +324,17 @@ wss.on('connection', (ws) => {
       ws.send(JSON.stringify({ type: 'started', sessionId: session.id }));
     } else if (msg.type === 'stop') {
       if (session) {
-        const record = session.finish();
-        ws.send(JSON.stringify({ type: 'stopped', session: record }));
+        const current = session;
         session = null;
+        current.finish().then((record) => {
+          current._safeSend({ type: 'stopped', session: record });
+        });
       }
     }
   });
 
   ws.on('close', () => {
-    if (session) session.finish();
+    if (session) session.finish().catch(() => {});
     session = null;
   });
 });

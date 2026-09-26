@@ -7,6 +7,7 @@ const finalTextEl = document.getElementById('finalText');
 const partialTextEl = document.getElementById('partialText');
 const jsonOutputEl = document.getElementById('jsonOutput');
 const downloadBtn = document.getElementById('downloadBtn');
+const audioDownloadEl = document.getElementById('audioDownload');
 
 let ws = null;
 let audioContext = null;
@@ -94,6 +95,9 @@ async function start() {
   partialTextEl.textContent = '';
   jsonOutputEl.textContent = '記録中…';
   downloadBtn.disabled = true;
+  audioDownloadEl.classList.add('is-disabled');
+  audioDownloadEl.removeAttribute('download');
+  audioDownloadEl.href = '#';
 
   setStatus('録音中… (話しかけてください)', true);
   stopBtn.disabled = false;
@@ -143,6 +147,11 @@ function handleServerMessage(msg) {
       lastSession = msg.session;
       jsonOutputEl.textContent = JSON.stringify(lastSession, null, 2);
       downloadBtn.disabled = false;
+      if (lastSession.audioUrl) {
+        audioDownloadEl.href = lastSession.audioUrl;
+        audioDownloadEl.download = `recording_${lastSession.sessionId}.mp4`;
+        audioDownloadEl.classList.remove('is-disabled');
+      }
       finishUI();
       if (ws) ws.close();
       break;
