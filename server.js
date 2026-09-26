@@ -19,8 +19,16 @@ const MODEL = process.env.SPEECH_MODEL || 'chirp_3';
 const DEFAULT_LANGUAGE = process.env.SPEECH_LANGUAGE || 'ja-JP';
 const TRANSCRIPTS_DIR = path.join(__dirname, 'transcripts');
 const RECORDINGS_DIR = path.join(__dirname, 'recordings');
+const ANALYSIS_DIR = path.join(__dirname, 'out', 'sessions');
 
-for (const dir of [TRANSCRIPTS_DIR, RECORDINGS_DIR]) {
+// 録音終了後に Python の音声解析ツール (voicehack analyze) を走らせる設定。
+// 既定は `uv run voicehack analyze <wav> --sr 16000 -o out/sessions/<name>`
+const ANALYSIS_ENABLED = process.env.ANALYSIS_ENABLED !== 'false';
+const ANALYSIS_CMD = (process.env.ANALYSIS_CMD || 'uv run voicehack').split(/\s+/).filter(Boolean);
+const ANALYSIS_ARGS = (process.env.ANALYSIS_ARGS ?? '--sr 16000').split(/\s+/).filter(Boolean);
+const ANALYSIS_IMAGES = ['prosody.png', 'spectrogram.png', 'spectrum.png', 'separation.png'];
+
+for (const dir of [TRANSCRIPTS_DIR, RECORDINGS_DIR, ANALYSIS_DIR]) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -35,6 +43,16 @@ if (!PROJECT_ID) {
 const app = express();
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/recordings', express.static(RECORDINGS_DIR));
+app.use('/analysis', express.static(ANALYSIS_DIR));
+
+// 終了したセッション (解析状況の問い合わせ用)。sessionId -> TranscriptionSession
+const finishedSessions = new Map();
+
+app.get('/api/sessions/:id', (req, res) => {
+  const session = finishedSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'session not found' });
+  res.json(session.toJSON());
+});
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
@@ -42,6 +60,9 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 // Google の streamingRecognize は 1 ストリームあたり最大 ~5分の制約があるため、
 // 上限に達する前にストリームを作り直して継続させる
 const STREAM_RESTART_MS = 4 * 60 * 1000;
+
+// 解析は CPU を食うので 1 件ずつ順番に実行する
+let analysisQueue = Promise.resolve();
 
 function buildRecognizerPath() {
   return `projects/${PROJECT_ID}/locations/${LOCATION}/recognizers/_`;
@@ -85,7 +106,13 @@ class TranscriptionSession {
     this.pendingAudio = [];
     this.ffmpegProcess = null;
     this.audioFileName = null;
+    this.wavFileName = null;
     this.recordingFailed = false;
+    this.analysis = { status: ANALYSIS_ENABLED ? 'pending' : 'disabled' };
+  }
+
+  get baseName() {
+    return `${this.startedAt.replace(/[:.]/g, '-')}_${this.id}`;
   }
 
   start() {
@@ -96,13 +123,15 @@ class TranscriptionSession {
   // 開始〜終了の間に受け取った生音声(PCM16)を、ffmpeg-static (npm同梱バイナリ) で
   // そのままMP4(AAC)へエンコードしながら保存する。ユーザー側でffmpegを別途
   // インストールする必要はない。
+  // 同時に、音声解析用に無劣化の WAV も書き出す (解析ツールは MP4 を読めないため)。
   _startRecording() {
     if (!ffmpegPath) {
       console.warn(`[session ${this.id}] ffmpeg-static のバイナリが見つからず、録音保存をスキップします`);
       this.recordingFailed = true;
       return;
     }
-    const filename = `${this.startedAt.replace(/[:.]/g, '-')}_${this.id}.mp4`;
+    const filename = `${this.baseName}.mp4`;
+    const wavFilename = `${this.baseName}.wav`;
     const outputPath = path.join(RECORDINGS_DIR, filename);
 
     const proc = spawn(ffmpegPath, [
@@ -112,11 +141,15 @@ class TranscriptionSession {
       '-ar', String(this.sampleRateHertz),
       '-ac', '1',
       '-i', 'pipe:0',
+      '-y',
+      '-map', '0:a',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-movflags', '+faststart',
-      '-y',
       outputPath,
+      '-map', '0:a',
+      '-c:a', 'pcm_s16le',
+      path.join(RECORDINGS_DIR, wavFilename),
     ]);
 
     proc.stdin.on('error', () => {
@@ -132,6 +165,7 @@ class TranscriptionSession {
 
     this.ffmpegProcess = proc;
     this.audioFileName = filename;
+    this.wavFileName = wavFilename;
   }
 
   _openStream() {
@@ -236,10 +270,84 @@ class TranscriptionSession {
     }
     await this._stopRecording();
     this.endedAt = new Date().toISOString();
+    finishedSessions.set(this.id, this);
+    this._startAnalysis();
     const record = this.toJSON();
     this._cachedRecord = record;
     this._persist(record);
     return record;
+  }
+
+  // 録音した WAV を voicehack analyze にかける。終わるまで待たずに戻り、
+  // 進捗は this.analysis (GET /api/sessions/:id) で確認する。
+  _startAnalysis() {
+    if (!ANALYSIS_ENABLED) return;
+    if (!this.wavFileName || this.recordingFailed) {
+      this.analysis = { status: 'skipped', error: '録音ファイルがありません' };
+      return;
+    }
+    const outDir = path.join(ANALYSIS_DIR, this.baseName);
+    const [cmd, ...cmdArgs] = ANALYSIS_CMD;
+    const args = [
+      ...cmdArgs,
+      'analyze',
+      path.join(RECORDINGS_DIR, this.wavFileName),
+      ...ANALYSIS_ARGS,
+      '-o', outDir,
+    ];
+    this.analysis = { status: 'running', startedAt: new Date().toISOString() };
+    console.log(`[session ${this.id}] analysis started: ${cmd} ${args.join(' ')}`);
+
+    analysisQueue = analysisQueue.then(() => new Promise((resolve) => {
+      let stderr = '';
+      let settled = false; // 起動失敗時は error と close の両方が来るので最初の 1 回だけ扱う
+      const proc = spawn(cmd, args, { cwd: __dirname });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
+      proc.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        this._finishAnalysis({ status: 'failed', error: `${cmd} を起動できません: ${err.message}` });
+        resolve();
+      });
+      proc.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        if (code !== 0) {
+          const lastLine = stderr.trim().split('\n').pop() || '';
+          this._finishAnalysis({ status: 'failed', error: `exit code ${code}: ${lastLine}` });
+          return resolve();
+        }
+        try {
+          const report = JSON.parse(fs.readFileSync(path.join(outDir, 'report.json'), 'utf8'));
+          const urlBase = `/analysis/${this.baseName}`;
+          this._finishAnalysis({
+            status: 'done',
+            reportUrl: `${urlBase}/report.json`,
+            images: ANALYSIS_IMAGES.filter((f) => fs.existsSync(path.join(outDir, f))).map(
+              (f) => `${urlBase}/${f}`
+            ),
+            report,
+          });
+        } catch (err) {
+          this._finishAnalysis({ status: 'failed', error: `report.json を読めません: ${err.message}` });
+        }
+        resolve();
+      });
+    }));
+  }
+
+  _finishAnalysis(result) {
+    this.analysis = { ...this.analysis, ...result, finishedAt: new Date().toISOString() };
+    if (result.status === 'done') {
+      console.log(`[session ${this.id}] analysis done -> ${path.join(ANALYSIS_DIR, this.baseName)}`);
+    } else {
+      console.error(`[session ${this.id}] analysis ${result.status}: ${result.error}`);
+    }
+    const record = this.toJSON();
+    this._cachedRecord = record;
+    this._persist(record);
   }
 
   // ffmpegへの入力を締めて、MP4への書き出しが完了するまで待つ
@@ -282,11 +390,13 @@ class TranscriptionSession {
       fullText: this.segments.map((s) => s.text).join(''),
       audioFile: hasAudio ? this.audioFileName : null,
       audioUrl: hasAudio ? `/recordings/${this.audioFileName}` : null,
+      wavFile: hasAudio ? this.wavFileName : null,
+      analysis: this.analysis,
     };
   }
 
   _persist(record) {
-    const filename = `${this.startedAt.replace(/[:.]/g, '-')}_${this.id}.json`;
+    const filename = `${this.baseName}.json`;
     const filePath = path.join(TRANSCRIPTS_DIR, filename);
     fs.writeFile(filePath, JSON.stringify(record, null, 2), (err) => {
       if (err) {

@@ -11,6 +11,7 @@ node_modules/
 transcripts/*.json
 !transcripts/.gitkeep
 recordings/*.mp4
+recordings/*.wav
 !recordings/.gitkeep
 npm-debug.log*
 

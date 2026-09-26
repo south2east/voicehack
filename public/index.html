@@ -10,7 +10,7 @@
   <main class="app">
     <header>
       <h1>voicehack</h1>
-      <p class="subtitle">Google Cloud Speech-to-Text (Chirp) でリアルタイム文字起こし</p>
+      <p class="subtitle">Google Cloud Speech-to-Text (Chirp) でリアルタイム文字起こし + 録音・音声解析</p>
     </header>
 
     <section class="controls">
@@ -23,6 +23,13 @@
       <h2>文字起こし</h2>
       <div id="finalText" class="final-text" aria-live="polite"></div>
       <div id="partialText" class="partial-text" aria-live="polite"></div>
+    </section>
+
+    <section class="analysis-area">
+      <h2>音声解析</h2>
+      <p id="analysisStatus" class="analysis-status">終了すると録音を解析します</p>
+      <dl id="analysisMetrics" class="analysis-metrics"></dl>
+      <div id="analysisImages" class="analysis-images"></div>
     </section>
 
     <section class="result-area">

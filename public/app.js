@@ -8,6 +8,11 @@ const partialTextEl = document.getElementById('partialText');
 const jsonOutputEl = document.getElementById('jsonOutput');
 const downloadBtn = document.getElementById('downloadBtn');
 const audioDownloadEl = document.getElementById('audioDownload');
+const analysisStatusEl = document.getElementById('analysisStatus');
+const analysisMetricsEl = document.getElementById('analysisMetrics');
+const analysisImagesEl = document.getElementById('analysisImages');
+
+const ANALYSIS_POLL_MS = 2000;
 
 let ws = null;
 let audioContext = null;
@@ -15,6 +20,7 @@ let sourceNode = null;
 let processorNode = null;
 let mediaStream = null;
 let lastSession = null;
+let analysisTimer = null;
 
 function setStatus(text, recording) {
   statusEl.textContent = text;
@@ -98,6 +104,7 @@ async function start() {
   audioDownloadEl.classList.add('is-disabled');
   audioDownloadEl.removeAttribute('download');
   audioDownloadEl.href = '#';
+  resetAnalysis();
 
   setStatus('録音中… (話しかけてください)', true);
   stopBtn.disabled = false;
@@ -144,13 +151,16 @@ function handleServerMessage(msg) {
       finalTextEl.textContent += msg.transcript;
       break;
     case 'stopped':
-      lastSession = msg.session;
-      jsonOutputEl.textContent = JSON.stringify(lastSession, null, 2);
+      showSession(msg.session);
       downloadBtn.disabled = false;
       if (lastSession.audioUrl) {
         audioDownloadEl.href = lastSession.audioUrl;
         audioDownloadEl.download = `recording_${lastSession.sessionId}.mp4`;
         audioDownloadEl.classList.remove('is-disabled');
+      }
+      renderAnalysis(lastSession.analysis);
+      if (lastSession.analysis && lastSession.analysis.status === 'running') {
+        pollAnalysis(lastSession.sessionId);
       }
       finishUI();
       if (ws) ws.close();
@@ -161,6 +171,103 @@ function handleServerMessage(msg) {
     default:
       break;
   }
+}
+
+function showSession(session) {
+  lastSession = session;
+  jsonOutputEl.textContent = JSON.stringify(session, null, 2);
+}
+
+// 解析はサーバー側で録音終了後に走るので、終わるまで定期的に問い合わせる
+function pollAnalysis(sessionId) {
+  clearTimeout(analysisTimer);
+  analysisTimer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const session = await res.json();
+      if (!lastSession || lastSession.sessionId !== sessionId) return;
+      showSession(session);
+      renderAnalysis(session.analysis);
+      if (session.analysis && session.analysis.status === 'running') pollAnalysis(sessionId);
+    } catch (err) {
+      analysisStatusEl.textContent = `解析状況を取得できません: ${err.message}`;
+    }
+  }, ANALYSIS_POLL_MS);
+}
+
+function resetAnalysis() {
+  clearTimeout(analysisTimer);
+  analysisStatusEl.textContent = '終了すると録音を解析します';
+  analysisMetricsEl.replaceChildren();
+  analysisImagesEl.replaceChildren();
+}
+
+function fmt(v, digits = 1, unit = '') {
+  return v === null || v === undefined ? '—' : `${Number(v).toFixed(digits)}${unit}`;
+}
+
+function renderAnalysis(analysis) {
+  analysisMetricsEl.replaceChildren();
+  analysisImagesEl.replaceChildren();
+  if (!analysis) return;
+
+  switch (analysis.status) {
+    case 'running':
+      analysisStatusEl.textContent = '解析中… (録音の長さと同じくらいかかります)';
+      return;
+    case 'failed':
+      analysisStatusEl.textContent = `解析に失敗しました: ${analysis.error}`;
+      return;
+    case 'skipped':
+      analysisStatusEl.textContent = `解析をスキップしました: ${analysis.error}`;
+      return;
+    case 'disabled':
+      analysisStatusEl.textContent = '解析は無効です (ANALYSIS_ENABLED=false)';
+      return;
+    case 'done':
+      break;
+    default:
+      return;
+  }
+
+  const r = analysis.report;
+  analysisStatusEl.textContent = `解析完了 (${fmt(r.file.duration_s, 1, ' 秒')})`;
+  const p = r.pitch;
+  const rows = [
+    ['大きさ', `${fmt(r.loudness.integrated_lufs, 1, ' LUFS')} / ピーク ${fmt(r.level.peak_dbfs, 1, ' dBFS')}`],
+    ['トーン', p.median_f0_hz
+      ? `F0 中央値 ${fmt(p.median_f0_hz, 0, ' Hz')} (${p.note}) / 抑揚 ${fmt(p.f0_range_semitones, 1, ' 半音')}`
+      : '有声区間なし'],
+    ['スピード', `発話速度 ${fmt(r.rate.speech_rate_syll_per_s, 2, ' 音節/s')} / 調音速度 ${fmt(r.rate.articulation_rate_syll_per_s, 2, ' 音節/s')} / ポーズ ${r.rate.n_pauses} 回`],
+  ];
+  if (r.separation) {
+    rows.push(['環境音', `${fmt(r.separation.environment.integrated_lufs, 1, ' LUFS')} (RMS ${fmt(r.separation.environment.rms_dbfs, 1, ' dBFS')})`]);
+  }
+  for (const [label, value] of rows) {
+    const dt = document.createElement('dt');
+    dt.textContent = label;
+    const dd = document.createElement('dd');
+    dd.textContent = value;
+    analysisMetricsEl.append(dt, dd);
+  }
+
+  for (const src of analysis.images || []) {
+    const a = document.createElement('a');
+    a.href = src;
+    a.target = '_blank';
+    const img = document.createElement('img');
+    img.src = src;
+    img.alt = src.split('/').pop();
+    img.loading = 'lazy';
+    a.append(img);
+    analysisImagesEl.append(a);
+  }
+  const link = document.createElement('a');
+  link.href = analysis.reportUrl;
+  link.target = '_blank';
+  link.textContent = 'report.json を開く';
+  analysisImagesEl.append(link);
 }
 
 function finishUI() {
