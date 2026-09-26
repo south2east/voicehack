@@ -119,6 +119,14 @@ def transcribe(x: np.ndarray, sr: int, model: str = "small",
 
         x, src, sr = resample(x, sr, 16000), resample(src, sr, 16000), 16000
     spans = active_intervals(x, sr, min_pause_s=split_pause_s)
+    # 有声フレーム (声帯振動) が 50 ms 未満の区間は物音の残りとみなして認識しない
+    # (従来法の分離では机の音の残りが区間になり, Whisper が「ん」などと認識していた)
+    from .pitch import pitch_track
+
+    p = pitch_track(x, sr)
+    hop = float(p.t[1] - p.t[0]) if len(p.t) > 1 else 0.01
+    spans = [(a, b) for a, b in spans
+             if p.voiced[(p.t >= a) & (p.t <= b)].sum() * hop >= 0.05]
     segs = [src[max(0, int((a - 0.2) * sr)): int((b + 0.2) * sr)].astype(np.float32)
             for a, b in spans]
     if backend == "groq":
