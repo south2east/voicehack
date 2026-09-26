@@ -1,5 +1,103 @@
 # voicehack
 
+音声を入力として, リアルタイム文字起こしと, 声の特徴 (大きさ・高さ・速さ) の解析・雑音分離を行うツール群です.
+
+| 構成 | 言語 | 場所 | 概要 |
+|---|---|---|---|
+| [1. リアルタイム文字起こしアプリ](#1-リアルタイム文字起こしアプリ-nodejs) | Node.js | `server.js`, `public/` | ブラウザのマイク入力を Google Cloud Speech-to-Text (Chirp 3) でストリーミング文字起こし |
+| [2. 音声解析ツール](#2-音声解析ツール-python) | Python | `src/voicehack/`, `experiments/`, `tests/` | スペクトル・大きさ (LUFS)・声の高さ・話す速さの計測, 声と環境音の分離 |
+| 調査ノート | — | `research_notes/`, `reports/` | 録音データのノイズ除去手法の調査 |
+
+どちらも設定はリポジトリ直下の **`.env`** (ひな形: `.env.example`) から読みます. `.env` は git 管理外です.
+
+```bash
+cp .env.example .env   # 使う機能の項目だけ埋めればよい
+```
+
+---
+
+## 1. リアルタイム文字起こしアプリ (Node.js)
+
+Google Cloud Speech-to-Text (Chirp 3) を使ったリアルタイム文字起こしアプリ。
+「開始」ボタンを押すとマイク入力がストリーミングでテキスト化され、「終了」ボタンで
+セッションを締めて結果を JSON として保存・ダウンロードできます。
+
+### 構成
+
+- `server.js` — Express + WebSocket サーバー。ブラウザから受け取った音声(PCM16)を
+  Google Cloud Speech-to-Text v2 API の `streamingRecognize` に中継し、認識結果を
+  ブラウザへリアルタイムに返します。セッション終了時に `transcripts/` へ JSON を保存します。
+- `public/` — フロントエンド (素のHTML/CSS/JS)。マイクを `AudioContext` で取得し、
+  16bit PCM に変換して WebSocket で送信します。
+- `transcripts/` — セッションごとの文字起こし結果 (JSON) の保存先 (git管理外)。
+
+### セットアップ
+
+```bash
+npm install
+cp .env.example .env
+```
+
+`.env` を編集し、以下を設定してください。
+
+| 変数 | 説明 |
+| --- | --- |
+| `GOOGLE_APPLICATION_CREDENTIALS` | サービスアカウントキー(JSON)へのパス |
+| `GOOGLE_CLOUD_PROJECT` | GCPプロジェクトID |
+| `GOOGLE_CLOUD_LOCATION` | Speech-to-Text の実行リージョン。Chirp 3 のストリーミングは `us` / `eu` マルチリージョンのみ GA (既定 `us`) |
+| `SPEECH_MODEL` | 認識モデル。既定値は `chirp_3`。使えない場合は `chirp_2` / `chirp` / `latest_long` にフォールバック |
+| `SPEECH_LANGUAGE` | 認識言語 (既定 `ja-JP`) |
+| `PORT` | サーバーのポート (既定 `3000`) |
+
+Google Cloud 側の事前準備:
+
+1. GCPプロジェクトで **Cloud Speech-to-Text API** を有効化
+2. サービスアカウントを作成し、`roles/speech.client` (または同等の権限) を付与してキー(JSON)を発行
+3. 発行した JSON を `GOOGLE_APPLICATION_CREDENTIALS` が指すパスに配置
+
+### 起動
+
+```bash
+npm start
+# または開発時: npm run dev
+```
+
+ブラウザで `http://localhost:3000` を開き、「開始」ボタンでマイクの利用を許可すると
+録音・リアルタイム文字起こしが始まります。「終了」ボタンでセッションを終了すると:
+
+- 確定した文字起こし結果が `transcript_<sessionId>.json` としてダウンロード可能になる
+- サーバー側にも `transcripts/<timestamp>_<sessionId>.json` として保存される
+
+#### JSON フォーマット
+
+```json
+{
+  "sessionId": "uuid",
+  "languageCode": "ja-JP",
+  "model": "chirp_3",
+  "startedAt": "2026-01-01T00:00:00.000Z",
+  "endedAt": "2026-01-01T00:01:23.000Z",
+  "segments": [
+    { "text": "こんにちは", "confidence": 0.98, "receivedAt": "2026-01-01T00:00:05.000Z" }
+  ],
+  "fullText": "こんにちは..."
+}
+```
+
+### 既知の制約
+
+- ブラウザの `ScriptProcessorNode` を使用 (非推奨API) — 動作はするが、将来的には
+  `AudioWorklet` への置き換えが望ましい
+- Google の `streamingRecognize` は1ストリームあたり最大 ~5分の制約があるため、
+  サーバー側で約4分ごとにストリームを自動的に張り直して継続する実装になっている
+  (再接続の瞬間にごく短い認識の途切れが発生し得る)
+- HTTPS/WSS 配信でない場合、ブラウザによっては `localhost` 以外でのマイクアクセスが
+  ブロックされる点に注意
+
+---
+
+## 2. 音声解析ツール (Python)
+
 話し声を録音・解析して, **スペクトル / スペクトログラム, 大きさ (LUFS), 声の高さと抑揚, 話す速さ** を数値と図で出し,
 **声と環境音を分離** する Python ツールです. 各処理は論文・規格にもとづいて実装し, 実録音で評価しています.
 
@@ -17,7 +115,7 @@
 
 大きさ・トーン・スピードは `prosody.png` にまとめて描画されます. トーンとスピードは, 分離した **音声側** の信号で測ります.
 
-## セットアップ
+### セットアップ
 
 動作確認環境: macOS (Apple Silicon), Python 3.11. Linux でも動きますが, マイク録音の開始音・`afplay`・
 キーチェーン・デモ音声作成 (`say`) は macOS 前提です.
@@ -27,8 +125,9 @@
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # 2. 取得して依存をインストール
-git clone <このリポジトリの URL> voicehack
+git clone https://github.com/south2east/voicehack.git
 cd voicehack
+git switch yuta-qwerty                       # main にマージされるまではこのブランチ
 uv sync --extra mic                          # 基本機能 + マイク録音
 uv sync --extra mic --extra asr --extra dnn  # 全部入り (音声認識 + 深層学習による分離, 約 1.2 GB)
 
@@ -49,7 +148,7 @@ uv run voicehack record -d 10 --asr          # ピッと鳴ったら話す
 
 `--asr groq` は追加パッケージ不要です (API キーのみ).
 
-## 使い方
+### 使い方
 
 ```bash
 # ファイルを解析 (wav / flac / ogg / mp3. m4a は ffmpeg 等で wav に変換してから)
@@ -83,7 +182,7 @@ speech.wav       分離した音声
 environment.wav  分離した環境音 (= 原音 − 音声. 足すと元に戻る)
 ```
 
-## Groq API キーの設定 (`--asr groq` を使う場合のみ)
+### Groq API キーの設定 (`--asr groq` を使う場合のみ)
 
 `--asr groq` は発話ごとの音声を Groq Cloud (`whisper-large-v3-turbo`) に送って文字起こしします.
 **録音した音声が Mac の外に送信されます.** `--asr` (ローカル) では送信されません.
@@ -112,13 +211,13 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 キーを探す順番は 環境変数 `GROQ_API_KEY` → `.env` → キーチェーン です.
 `.gitignore` は `.env` / `.env.*` (`.env.example` を除く) / `*.key` を除外しています.
 
-## 評価用データについて
+### 評価用データについて
 
 `experiments/eval_rate.py` と `experiments/eval_overlap.py` は, 作者の実録音 (`out/` 以下) を使います.
 録音は個人の声なのでリポジトリには含めていません. 自分で評価する場合は, 各スクリプト冒頭の説明に沿って
 同じ条件で録音し (`uv run voicehack record ...`), 区間の定義を書き換えてください.
 
-## 検証 (`uv run pytest`)
+### 検証 (`uv run pytest`)
 
 - K 特性フィルタ係数が BS.1770-4 の 48 kHz 係数表と 1e-8 以内で一致
 - 997 Hz / 0 dBFS 正弦波 → −3.01 LUFS (規格の校正条件; 16 / 44.1 / 48 kHz で確認)
@@ -136,7 +235,7 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 分離後の音声 SNR が約 +6.5 dB 改善 (1.0 → 7.6 dB). 読み上げ速度を変えた 3 種で,
 測定した発話速度の比 (fast / slow = 1.67) は実際の発話時間の比 (1.66) と一致しました.
 
-## 既知の限界
+### 既知の限界
 
 - **突発音の分離.** 従来法 (既定) は, 声から離れた突発音 (机・拍手・クリック) を周期性ゲートで環境音側に回します
   (実録音 10 回で声側の残り 29〜80% → 0.3%, 語末「す」の保持 82〜100%). 声と同時に鳴った突発音は分けられません.
@@ -171,7 +270,7 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
   変調周波数 (mrate) は音節を数えない補助指標ですが, 速さの違いに対する感度は低めです.
 - 発話速度は録音全長ではなく「最初〜最後の音節核」の区間で割っています.
 
-## 参考文献
+### 参考文献
 
 - P. D. Welch, IEEE Trans. Audio Electroacoust. 15(2), 1967.
 - F. J. Harris, Proc. IEEE 66(1), 1978.
@@ -193,7 +292,7 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 - N. Morgan, E. Fosler-Lussier, Proc. ICASSP, 1998.
 - A. Radford et al., "Robust speech recognition via large-scale weak supervision," ICML 2023 (Whisper).
 
-## 使用している外部モデル・データ
+### 使用している外部モデル・データ
 
 | 名前 | 用途 | ライセンス |
 |---|---|---|

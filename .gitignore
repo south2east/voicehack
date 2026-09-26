@@ -1,3 +1,20 @@
+# ---- 共通: 秘密情報は置かない ----
+.env
+.env.*
+!.env.example
+*.key
+service-account.json
+.DS_Store
+
+# ---- 1. リアルタイム文字起こしアプリ (Node.js) ----
+node_modules/
+transcripts/*.json
+!transcripts/.gitkeep
+recordings/*.mp4
+!recordings/.gitkeep
+npm-debug.log*
+
+# ---- 2. 音声解析ツール (Python) ----
 .venv/
 __pycache__/
 *.pyc
@@ -5,9 +22,3 @@ __pycache__/
 out/
 samples/*.wav
 samples/*.aiff
-
-# 秘密情報 (API キーなど) は置かない. 念のため除外
-.env
-.env.*
-!.env.example
-*.key
