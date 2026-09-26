@@ -4,7 +4,7 @@
 
 | 構成 | 言語 | 場所 | 概要 |
 |---|---|---|---|
-| [1. リアルタイム文字起こしアプリ](#1-リアルタイム文字起こしアプリ-nodejs) | Node.js | `server.js`, `public/` | ブラウザのマイク入力を Google Cloud Speech-to-Text (Chirp 3) でストリーミング文字起こし |
+| [1. リアルタイム文字起こしアプリ](#1-リアルタイム文字起こしアプリ-nodejs) | Node.js | `server.js`, `public/` | ブラウザのマイク入力を Google Cloud Speech-to-Text (Chirp 3) でストリーミング文字起こし. 録音を保存し, 終了後に 2. の解析ツールへ自動で渡す |
 | [2. 音声解析ツール](#2-音声解析ツール-python) | Python | `src/voicehack/`, `experiments/`, `tests/` | スペクトル・大きさ (LUFS)・声の高さ・話す速さの計測, 声と環境音の分離 |
 | 調査ノート | — | `research_notes/`, `reports/` | 録音データのノイズ除去手法の調査 |
 
@@ -14,17 +14,19 @@
 ```
 ブラウザ ─ マイク ─▶ server.js ─┬─▶ Google Speech-to-Text (生の音のまま. リアルタイム文字起こし)
                                 └─▶ recordings/: MP4 と WAV で保存
-「終了」 → uv run voicehack analyze recordings/<id>.wav --transcript transcripts/<id>.json
-           (文字起こしからモーラ/秒を計算. Whisper は使わない)
-         → analysis/<id>/ (report.json, 図, speech.wav, environment.wav) → 画面の「音声解析」パネル
+「終了」 → uv run voicehack analyze recordings/<name>.wav --sr 16000 --transcript <文字起こし> [--dnn]
+           (バックグラウンドで 1 件ずつ実行. 文字起こしからモーラ/秒を計算し, Whisper は使わない)
+         → out/sessions/<name>/ (report.json, 図, speech.wav, environment.wav)
+         → 画面が GET /api/sessions/<id> で完了を確認し「音声解析」欄に表示
 ```
 
 - 文字起こし (STT) には **ノイズ除去していない生の音** を渡します. 分離後の音を認識させると誤りが増えるため
   (本リポジトリの実測, および `reports/録音データのノイズ除去手法.md` の調査結果).
 - 「声と重なった物音も分離する」にチェックすると `--dnn` で解析します (15 秒の録音で約 15 秒).
   外すと数秒で終わります.
+- 「音声解析」欄には数値 (大きさ・トーン・スピード・環境音), 元の音 / 声だけ / 環境音だけの聞き比べ, 図が出ます.
 - 使うには 1 と 2 の両方のセットアップが必要です (`npm install` と `uv sync --extra asr`).
-  解析を止めたいときは `.env` に `VOICEHACK_ANALYZE=0`.
+  解析の有効/無効や引数は `.env` の `ANALYSIS_ENABLED` / `ANALYSIS_CMD` / `ANALYSIS_ARGS` で変えられます.
 
 どちらも設定はリポジトリ直下の **`.env`** (ひな形: `.env.example`) から読みます. `.env` は git 管理外です.
 
@@ -39,20 +41,27 @@ cp .env.example .env   # 使う機能の項目だけ埋めればよい
 Google Cloud Speech-to-Text (Chirp 3) を使ったリアルタイム文字起こしアプリ。
 「開始」ボタンを押すとマイク入力がストリーミングでテキスト化され、「終了」ボタンで
 セッションを締めて結果を JSON として保存・ダウンロードできます。
+同じ音声は録音として保存され、終了後に [2. 音声解析ツール](#2-音声解析ツール-python) で
+大きさ・トーン・スピードなどを自動で解析し、画面に表示します。
 
 ### 構成
 
 - `server.js` — Express + WebSocket サーバー。ブラウザから受け取った音声(PCM16)を
   Google Cloud Speech-to-Text v2 API の `streamingRecognize` に中継し、認識結果を
-  ブラウザへリアルタイムに返します。セッション終了時に `transcripts/` へ JSON を保存します。
+  ブラウザへリアルタイムに返します。同じ音声を ffmpeg-static (npm 同梱) で録音ファイルに
+  書き出し、セッション終了後に `uv run voicehack analyze` をバックグラウンドで実行します。
+  セッション終了時と解析完了時に `transcripts/` へ JSON を保存します。
 - `public/` — フロントエンド (素のHTML/CSS/JS)。マイクを `AudioContext` で取得し、
   16bit PCM に変換して WebSocket で送信します。
 - `transcripts/` — セッションごとの文字起こし結果 (JSON) の保存先 (git管理外)。
+- `recordings/` — 録音の保存先 (git管理外)。ダウンロード用の MP4 (AAC) と解析用の WAV (16bit PCM) を保存。
+- `out/sessions/<timestamp>_<sessionId>/` — 解析結果 (`report.json`, 図, 分離音声) の保存先 (git管理外)。
 
 ### セットアップ
 
 ```bash
 npm install
+uv sync          # 録音の解析を使う場合 (2. のセットアップ参照)
 cp .env.example .env
 ```
 
@@ -66,6 +75,9 @@ cp .env.example .env
 | `SPEECH_MODEL` | 認識モデル。既定値は `chirp_3`。使えない場合は `chirp_2` / `chirp` / `latest_long` にフォールバック |
 | `SPEECH_LANGUAGE` | 認識言語 (既定 `ja-JP`) |
 | `PORT` | サーバーのポート (既定 `3000`) |
+| `ANALYSIS_ENABLED` | `false` にすると終了後の音声解析をしない (既定: 解析する) |
+| `ANALYSIS_CMD` | 解析ツールの起動コマンド (既定 `uv run voicehack`) |
+| `ANALYSIS_ARGS` | `voicehack analyze` に渡す追加オプション (既定 `--sr 16000`。例: `--sr 16000 --asr groq`) |
 
 Google Cloud 側の事前準備:
 
@@ -83,8 +95,12 @@ npm start
 ブラウザで `http://localhost:3000` を開き、「開始」ボタンでマイクの利用を許可すると
 録音・リアルタイム文字起こしが始まります。「終了」ボタンでセッションを終了すると:
 
-- 確定した文字起こし結果が `transcript_<sessionId>.json` としてダウンロード可能になる
+- 確定した文字起こし結果が `transcript_<sessionId>.json` として、録音が MP4 としてダウンロード可能になる
 - サーバー側にも `transcripts/<timestamp>_<sessionId>.json` として保存される
+- 録音の解析がバックグラウンドで始まり、完了すると「音声解析」欄に大きさ・トーン・スピード・環境音の
+  数値と図が表示される (録音の長さと同程度の時間がかかる。解析は 1 件ずつ順番に実行)
+
+`uv` や Python 環境が無い場合も文字起こしと録音は動き、解析欄にエラーが表示されるだけです。
 
 #### JSON フォーマット
 
@@ -98,9 +114,21 @@ npm start
   "segments": [
     { "text": "こんにちは", "confidence": 0.98, "receivedAt": "2026-01-01T00:00:05.000Z" }
   ],
-  "fullText": "こんにちは..."
+  "fullText": "こんにちは...",
+  "audioFile": "<timestamp>_<sessionId>.mp4",
+  "audioUrl": "/recordings/<timestamp>_<sessionId>.mp4",
+  "wavFile": "<timestamp>_<sessionId>.wav",
+  "analysis": {
+    "status": "done",
+    "reportUrl": "/analysis/<timestamp>_<sessionId>/report.json",
+    "images": ["/analysis/<timestamp>_<sessionId>/prosody.png", "..."],
+    "report": { "level": {}, "loudness": {}, "pitch": {}, "rate": {}, "spectrum": {}, "separation": {} }
+  }
 }
 ```
+
+`analysis.status` は `running` → `done` / `failed` / `skipped` (録音なし) / `disabled` と変化します。
+解析中の状態は `GET /api/sessions/<sessionId>` で取得できます (サーバー起動中に終了したセッションのみ)。
 
 ### 既知の制約
 

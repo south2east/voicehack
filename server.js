@@ -19,13 +19,14 @@ const MODEL = process.env.SPEECH_MODEL || 'chirp_3';
 const DEFAULT_LANGUAGE = process.env.SPEECH_LANGUAGE || 'ja-JP';
 const TRANSCRIPTS_DIR = path.join(__dirname, 'transcripts');
 const RECORDINGS_DIR = path.join(__dirname, 'recordings');
-const ANALYSIS_DIR = path.join(__dirname, 'analysis');
+const ANALYSIS_DIR = path.join(__dirname, 'out', 'sessions');
 
-// セッション終了後に Python の音声解析ツール (src/voicehack) を呼ぶ設定
-//   VOICEHACK_ANALYZE=0 で無効, VOICEHACK_UV で uv コマンドのパスを指定
-const ANALYZE_ENABLED = process.env.VOICEHACK_ANALYZE !== '0';
-const UV_CMD = process.env.VOICEHACK_UV || 'uv';
-const ANALYZE_TIMEOUT_MS = 10 * 60 * 1000;
+// 録音終了後に Python の音声解析ツール (voicehack analyze) を走らせる設定。
+// 既定は `uv run voicehack analyze <wav> --sr 16000 -o out/sessions/<name>`
+const ANALYSIS_ENABLED = process.env.ANALYSIS_ENABLED !== 'false';
+const ANALYSIS_CMD = (process.env.ANALYSIS_CMD || 'uv run voicehack').split(/\s+/).filter(Boolean);
+const ANALYSIS_ARGS = (process.env.ANALYSIS_ARGS ?? '--sr 16000').split(/\s+/).filter(Boolean);
+const ANALYSIS_IMAGES = ['prosody.png', 'spectrogram.png', 'spectrum.png', 'separation.png'];
 
 for (const dir of [TRANSCRIPTS_DIR, RECORDINGS_DIR, ANALYSIS_DIR]) {
   if (!fs.existsSync(dir)) {
@@ -44,12 +45,24 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use('/recordings', express.static(RECORDINGS_DIR));
 app.use('/analysis', express.static(ANALYSIS_DIR));
 
+// 終了したセッション (解析状況の問い合わせ用)。sessionId -> TranscriptionSession
+const finishedSessions = new Map();
+
+app.get('/api/sessions/:id', (req, res) => {
+  const session = finishedSessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: 'session not found' });
+  res.json(session.toJSON());
+});
+
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
 // Google の streamingRecognize は 1 ストリームあたり最大 ~5分の制約があるため、
 // 上限に達する前にストリームを作り直して継続させる
 const STREAM_RESTART_MS = 4 * 60 * 1000;
+
+// 解析は CPU を食うので 1 件ずつ順番に実行する
+let analysisQueue = Promise.resolve();
 
 function buildRecognizerPath() {
   return `projects/${PROJECT_ID}/locations/${LOCATION}/recognizers/_`;
@@ -76,7 +89,7 @@ function buildStreamingConfig(sampleRateHertz, languageCode) {
 }
 
 class TranscriptionSession {
-  constructor(ws, { sampleRateHertz, languageCode }) {
+  constructor(ws, { sampleRateHertz, languageCode, analyzeDnn }) {
     this.ws = ws;
     this.sampleRateHertz = sampleRateHertz;
     this.languageCode = languageCode || DEFAULT_LANGUAGE;
@@ -95,6 +108,12 @@ class TranscriptionSession {
     this.audioFileName = null;
     this.wavFileName = null;
     this.recordingFailed = false;
+    this.analysis = { status: ANALYSIS_ENABLED ? 'pending' : 'disabled' };
+    this.analyzeDnn = !!analyzeDnn;
+  }
+
+  get baseName() {
+    return `${this.startedAt.replace(/[:.]/g, '-')}_${this.id}`;
   }
 
   start() {
@@ -105,18 +124,16 @@ class TranscriptionSession {
   // 開始〜終了の間に受け取った生音声(PCM16)を、ffmpeg-static (npm同梱バイナリ) で
   // そのままMP4(AAC)へエンコードしながら保存する。ユーザー側でffmpegを別途
   // インストールする必要はない。
-  // 同時に同じ音声を WAV (PCM16, 無圧縮) でも保存する。Python の解析ツールは
-  // MP4(AAC) を読めないため, 解析と聞き比べにはこちらを使う。
+  // 同時に、音声解析用に無劣化の WAV も書き出す (解析ツールは MP4 を読めないため)。
   _startRecording() {
     if (!ffmpegPath) {
       console.warn(`[session ${this.id}] ffmpeg-static のバイナリが見つからず、録音保存をスキップします`);
       this.recordingFailed = true;
       return;
     }
-    const base = `${this.startedAt.replace(/[:.]/g, '-')}_${this.id}`;
-    const filename = `${base}.mp4`;
+    const filename = `${this.baseName}.mp4`;
+    const wavFilename = `${this.baseName}.wav`;
     const outputPath = path.join(RECORDINGS_DIR, filename);
-    const wavName = `${base}.wav`;
 
     const proc = spawn(ffmpegPath, [
       '-hide_banner',
@@ -125,14 +142,15 @@ class TranscriptionSession {
       '-ar', String(this.sampleRateHertz),
       '-ac', '1',
       '-i', 'pipe:0',
+      '-y',
+      '-map', '0:a',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-movflags', '+faststart',
-      '-y',
       outputPath,
+      '-map', '0:a',
       '-c:a', 'pcm_s16le',
-      '-y',
-      path.join(RECORDINGS_DIR, wavName),
+      path.join(RECORDINGS_DIR, wavFilename),
     ]);
 
     proc.stdin.on('error', () => {
@@ -148,7 +166,7 @@ class TranscriptionSession {
 
     this.ffmpegProcess = proc;
     this.audioFileName = filename;
-    this.wavFileName = wavName;
+    this.wavFileName = wavFilename;
   }
 
   _openStream() {
@@ -253,10 +271,104 @@ class TranscriptionSession {
     }
     await this._stopRecording();
     this.endedAt = new Date().toISOString();
+    finishedSessions.set(this.id, this);
+    this._startAnalysis();
     const record = this.toJSON();
     this._cachedRecord = record;
-    await this._persist(record);
+    this._persist(record);
     return record;
+  }
+
+  // 録音した WAV を voicehack analyze にかける。終わるまで待たずに戻り、
+  // 進捗は this.analysis (GET /api/sessions/:id) で確認する。
+  _startAnalysis() {
+    if (!ANALYSIS_ENABLED) return;
+    if (!this.wavFileName || this.recordingFailed) {
+      this.analysis = { status: 'skipped', error: '録音ファイルがありません' };
+      return;
+    }
+    const outDir = path.join(ANALYSIS_DIR, this.baseName);
+    const [cmd, ...cmdArgs] = ANALYSIS_CMD;
+    // Google STT の文字起こしを渡すと, 話す速さをモーラ/秒で出す (Whisper を使わない)
+    const extra = [];
+    const text = this.segments.map((s) => s.text).join('').trim();
+    if (text) {
+      fs.mkdirSync(outDir, { recursive: true });
+      const transcriptPath = path.join(outDir, 'transcript.txt');
+      fs.writeFileSync(transcriptPath, text);
+      extra.push('--transcript', transcriptPath);
+    }
+    // 画面で「声と重なった物音も分離」を選んだセッションは深層学習 (SepFormer) で分離
+    if (this.analyzeDnn) extra.push('--dnn');
+    const args = [
+      ...cmdArgs,
+      'analyze',
+      path.join(RECORDINGS_DIR, this.wavFileName),
+      ...ANALYSIS_ARGS,
+      ...extra,
+      '-o', outDir,
+    ];
+    this.analysis = { status: 'running', dnn: this.analyzeDnn, startedAt: new Date().toISOString() };
+    console.log(`[session ${this.id}] analysis started: ${cmd} ${args.join(' ')}`);
+
+    analysisQueue = analysisQueue.then(() => new Promise((resolve) => {
+      let stderr = '';
+      let settled = false; // 起動失敗時は error と close の両方が来るので最初の 1 回だけ扱う
+      const proc = spawn(cmd, args, { cwd: __dirname });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
+      proc.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        this._finishAnalysis({ status: 'failed', error: `${cmd} を起動できません: ${err.message}` });
+        resolve();
+      });
+      proc.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        if (code !== 0) {
+          const lastLine = stderr.trim().split('\n').pop() || '';
+          this._finishAnalysis({ status: 'failed', error: `exit code ${code}: ${lastLine}` });
+          return resolve();
+        }
+        try {
+          const report = JSON.parse(fs.readFileSync(path.join(outDir, 'report.json'), 'utf8'));
+          const urlBase = `/analysis/${this.baseName}`;
+          this._finishAnalysis({
+            status: 'done',
+            reportUrl: `${urlBase}/report.json`,
+            images: ANALYSIS_IMAGES.filter((f) => fs.existsSync(path.join(outDir, f))).map(
+              (f) => `${urlBase}/${f}`
+            ),
+            // 元の音 / 分離した声 / 環境音 の聞き比べ用
+            audio: {
+              original: `/recordings/${this.wavFileName}`,
+              speech: fs.existsSync(path.join(outDir, 'speech.wav')) ? `${urlBase}/speech.wav` : null,
+              environment: fs.existsSync(path.join(outDir, 'environment.wav'))
+                ? `${urlBase}/environment.wav`
+                : null,
+            },
+            report,
+          });
+        } catch (err) {
+          this._finishAnalysis({ status: 'failed', error: `report.json を読めません: ${err.message}` });
+        }
+        resolve();
+      });
+    }));
+  }
+
+  _finishAnalysis(result) {
+    this.analysis = { ...this.analysis, ...result, finishedAt: new Date().toISOString() };
+    if (result.status === 'done') {
+      console.log(`[session ${this.id}] analysis done -> ${path.join(ANALYSIS_DIR, this.baseName)}`);
+    } else {
+      console.error(`[session ${this.id}] analysis ${result.status}: ${result.error}`);
+    }
+    const record = this.toJSON();
+    this._cachedRecord = record;
+    this._persist(record);
   }
 
   // ffmpegへの入力を締めて、MP4への書き出しが完了するまで待つ
@@ -299,107 +411,26 @@ class TranscriptionSession {
       fullText: this.segments.map((s) => s.text).join(''),
       audioFile: hasAudio ? this.audioFileName : null,
       audioUrl: hasAudio ? `/recordings/${this.audioFileName}` : null,
-      wavUrl: hasAudio && this.wavFileName ? `/recordings/${this.wavFileName}` : null,
+      wavFile: hasAudio ? this.wavFileName : null,
+      analysis: this.analysis,
     };
   }
 
-  // 解析ツールに文字起こしを渡すため, 書き込み完了まで待てるよう Promise を返す
-  async _persist(record) {
-    const filename = `${this.startedAt.replace(/[:.]/g, '-')}_${this.id}.json`;
+  _persist(record) {
+    const filename = `${this.baseName}.json`;
     const filePath = path.join(TRANSCRIPTS_DIR, filename);
-    this.transcriptPath = filePath;
-    try {
-      await fs.promises.writeFile(filePath, JSON.stringify(record, null, 2));
-      console.log(`[session ${this.id}] transcript saved -> ${filePath}`);
-    } catch (err) {
-      console.error(`[session ${this.id}] failed to persist transcript:`, err.message);
-      this.transcriptPath = null;
-    }
-  }
-
-  // 録音 (WAV) を Python の音声解析ツールにかける。
-  // 大きさ・声の高さ・話す速さの計測と, 声/環境音の分離を行い, 結果を analysis/<id>/ に置く。
-  // 文字起こし (Google STT) を渡すので, 話す速さ (モーラ/秒) に Whisper は使わない。
-  analyze({ dnn = false } = {}) {
-    return new Promise((resolve, reject) => {
-      if (!this.wavFileName || this.recordingFailed) {
-        return reject(new Error('録音ファイルがないため解析できません'));
+    fs.writeFile(filePath, JSON.stringify(record, null, 2), (err) => {
+      if (err) {
+        console.error(`[session ${this.id}] failed to persist transcript:`, err.message);
+      } else {
+        console.log(`[session ${this.id}] transcript saved -> ${filePath}`);
       }
-      const wavPath = path.join(RECORDINGS_DIR, this.wavFileName);
-      const outDir = path.join(ANALYSIS_DIR, this.id);
-      const args = ['run', '--project', __dirname, 'voicehack', 'analyze', wavPath,
-        '-o', outDir, '--sr', '16000'];
-      const hasText = this._cachedRecord && this._cachedRecord.fullText;
-      if (hasText && this.transcriptPath) args.push('--transcript', this.transcriptPath);
-      if (dnn) args.push('--dnn');
-
-      const proc = spawn(UV_CMD, args, { cwd: __dirname });
-      let stderr = '';
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
-      const timer = setTimeout(() => proc.kill('SIGKILL'), ANALYZE_TIMEOUT_MS);
-      proc.on('error', (err) => {
-        clearTimeout(timer);
-        reject(new Error(`解析ツールを起動できません (${UV_CMD}): ${err.message}`));
-      });
-      proc.on('close', async (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
-          const tail = stderr.trim().split('\n').slice(-3).join(' / ');
-          return reject(new Error(`解析ツールが失敗しました (code ${code}): ${tail}`));
-        }
-        try {
-          const report = JSON.parse(await fs.promises.readFile(path.join(outDir, 'report.json'), 'utf8'));
-          resolve(summarizeAnalysis(this.id, report, { dnn, wavUrl: `/recordings/${this.wavFileName}` }));
-        } catch (err) {
-          reject(new Error(`解析結果を読めません: ${err.message}`));
-        }
-      });
     });
   }
 }
 
-// report.json から画面に出す主要な数値と, 図・分離音声の URL を取り出す
-function summarizeAnalysis(sessionId, r, { dnn, wavUrl }) {
-  const base = `/analysis/${sessionId}`;
-  const rate = r.rate || {};
-  const t = rate.transcript || {};
-  const pitch = r.pitch || {};
-  const env = (r.separation && r.separation.environment) || {};
-  return {
-    sessionId,
-    method: dnn ? 'SepFormer (深層学習) + 周期性ゲート' : 'MCRA + MMSE-LSA + 周期性ゲート',
-    metrics: {
-      durationS: r.file && r.file.duration_s,
-      loudnessLufs: r.loudness && r.loudness.integrated_lufs,
-      peakDbfs: r.level && r.level.peak_dbfs,
-      f0MedianHz: pitch.median_f0_hz,
-      note: pitch.note,
-      f0RangeSemitones: pitch.f0_range_semitones,
-      moraRate: t.speech_rate_mora_per_s,
-      articulationMoraRate: t.articulation_rate_mora_per_s,
-      morae: t.morae,
-      syllableRate: rate.speech_rate_syll_per_s,
-      pauses: rate.n_pauses,
-      environmentLufs: env.integrated_lufs,
-    },
-    audio: {
-      original: wavUrl,
-      speech: `${base}/speech.wav`,
-      environment: `${base}/environment.wav`,
-    },
-    figures: {
-      prosody: `${base}/prosody.png`,
-      separation: `${base}/separation.png`,
-      spectrogram: `${base}/spectrogram.png`,
-      spectrum: `${base}/spectrum.png`,
-    },
-    reportUrl: `${base}/report.json`,
-  };
-}
-
 wss.on('connection', (ws) => {
   let session = null;
-  let analyzeDnn = false;
 
   ws.on('message', (data, isBinary) => {
     if (isBinary) {
@@ -416,10 +447,10 @@ wss.on('connection', (ws) => {
 
     if (msg.type === 'start') {
       if (session) session.finish().catch(() => {});
-      analyzeDnn = !!msg.analyzeDnn;
       session = new TranscriptionSession(ws, {
         sampleRateHertz: msg.sampleRate || 48000,
         languageCode: msg.languageCode,
+        analyzeDnn: msg.analyzeDnn,
       });
       session.start();
       ws.send(JSON.stringify({ type: 'started', sessionId: session.id }));
@@ -428,17 +459,7 @@ wss.on('connection', (ws) => {
         const current = session;
         session = null;
         current.finish().then((record) => {
-          const willAnalyze = ANALYZE_ENABLED && !!record.wavUrl;
-          current._safeSend({ type: 'stopped', session: record, analysisPending: willAnalyze });
-          if (!willAnalyze) return;
-          current._safeSend({ type: 'analysis_started', dnn: analyzeDnn });
-          current
-            .analyze({ dnn: analyzeDnn })
-            .then((analysis) => current._safeSend({ type: 'analysis', analysis }))
-            .catch((err) => {
-              console.error(`[session ${current.id}] analysis failed:`, err.message);
-              current._safeSend({ type: 'analysis_error', message: err.message });
-            });
+          current._safeSend({ type: 'stopped', session: record });
         });
       }
     }

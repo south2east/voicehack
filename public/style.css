@@ -86,8 +86,8 @@ header h1 {
 }
 
 .transcript-area,
-.result-area,
-.analysis-area {
+.analysis-area,
+.result-area {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -96,8 +96,8 @@ header h1 {
 }
 
 .transcript-area h2,
-.result-area h2,
-.analysis-area h2 {
+.analysis-area h2,
+.result-area h2 {
   margin: 0 0 10px;
   font-size: 1rem;
   color: var(--muted);
@@ -152,6 +152,42 @@ header h1 {
   color: #a5d6a7;
 }
 
+.analysis-status {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.analysis-metrics {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  margin: 0 0 12px;
+}
+
+.analysis-metrics dt {
+  color: var(--muted);
+}
+
+.analysis-metrics dd {
+  margin: 0;
+}
+
+.analysis-images {
+  display: grid;
+  gap: 10px;
+}
+
+.analysis-images img {
+  width: 100%;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.analysis-images a {
+  color: var(--accent);
+}
+
 .option {
   display: flex;
   align-items: center;
@@ -161,53 +197,14 @@ header h1 {
   font-size: 0.85rem;
 }
 
-.analysis-status {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin: 4px 0;
-}
-
-.analysis-status:empty {
-  display: none;
-}
-
-.metrics {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 10px;
-  margin: 10px 0 16px;
-}
-
-.metric {
-  background: #0b0d12;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.metric-label {
-  color: var(--muted);
-  font-size: 0.75rem;
-}
-
-.metric-value {
-  font-size: 1.15rem;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.metric-sub {
-  color: var(--muted);
-  font-size: 0.72rem;
-}
-
 .players {
   display: grid;
   gap: 8px;
-  margin-bottom: 8px;
+  margin: 0 0 12px;
+}
+
+.players:empty {
+  display: none;
 }
 
 .player {
@@ -220,26 +217,4 @@ header h1 {
 
 .player audio {
   width: 100%;
-}
-
-.note {
-  color: var(--muted);
-  font-size: 0.75rem;
-  margin: 4px 0 12px;
-}
-
-.analysis-area figure {
-  margin: 0 0 16px;
-}
-
-.analysis-area figcaption {
-  color: var(--muted);
-  font-size: 0.8rem;
-  margin-bottom: 6px;
-}
-
-.analysis-area img {
-  width: 100%;
-  border-radius: 6px;
-  background: #fcfcfb;
 }
