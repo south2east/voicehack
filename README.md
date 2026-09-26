@@ -74,8 +74,15 @@ security find-generic-password -a "$USER" -s GROQ_API_KEY >/dev/null && echo "sa
 security delete-generic-password -a "$USER" -s GROQ_API_KEY
 ```
 
-環境変数 `GROQ_API_KEY` が設定されていればそちらを優先します (CI など macOS 以外向け).
-リポジトリの `.gitignore` は `.env` / `.env.*` / `*.key` を除外しています.
+`.env` ファイルでも設定できます (ひな形は `.env.example`). `.env` は `.gitignore` で除外済みですが,
+平文で置かれる点に注意してください.
+
+```bash
+cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
+```
+
+キーを探す順番は 環境変数 `GROQ_API_KEY` → `.env` → キーチェーン です.
+`.gitignore` は `.env` / `.env.*` (`.env.example` を除く) / `*.key` を除外しています.
 
 ## 検証 (`uv run pytest`)
 

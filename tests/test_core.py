@@ -244,10 +244,13 @@ def test_groq_backend_requests(monkeypatch):
 
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
     monkeypatch.setattr(g, "_from_keychain", lambda: "")
+    monkeypatch.setattr(g, "_from_dotenv", lambda name="GROQ_API_KEY": "")
     with pytest.raises(g.GroqError, match="API キーが見つかりません"):
         g.transcribe_segments([np.zeros(SR)], SR)
     monkeypatch.setattr(g, "_from_keychain", lambda: "gsk_from_keychain")
     assert g.api_key() == "gsk_from_keychain"
+    monkeypatch.setattr(g, "_from_dotenv", lambda name="GROQ_API_KEY": "gsk_from_dotenv")
+    assert g.api_key() == "gsk_from_dotenv"                     # .env はキーチェーンより優先
 
     monkeypatch.setenv("GROQ_API_KEY", "gsk_test_dummy")
     sent = []
@@ -274,3 +277,11 @@ def test_groq_backend_requests(monkeypatch):
     body = req.data
     assert b'name="model"' in body and g.DEFAULT_MODEL.encode() in body
     assert b'name="language"\r\n\r\nja' in body and b"fLaC" in body
+
+
+def test_dotenv_parsing(tmp_path, monkeypatch):
+    import voicehack.groq_asr as g
+
+    (tmp_path / ".env").write_text('# comment\nOTHER=1\nexport GROQ_API_KEY="gsk_abc"\n')
+    monkeypatch.chdir(tmp_path)
+    assert g._from_dotenv() == "gsk_abc"

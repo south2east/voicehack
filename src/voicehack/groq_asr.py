@@ -1,7 +1,7 @@
 """Groq Cloud の Whisper API による文字起こし (`--asr groq`).
 
-音声は Groq のサーバーへ送信される. API キーは環境変数 GROQ_API_KEY か macOS キーチェーン
-からだけ読み, コードやリポジトリには置かない (README の「Groq API キーの設定」参照).
+音声は Groq のサーバーへ送信される. API キーは 環境変数 GROQ_API_KEY → .env (git 管理外)
+→ macOS キーチェーン の順で探し, コードやリポジトリには置かない (.env.example と README 参照).
 API は OpenAI 互換の POST /openai/v1/audio/transcriptions で, 追加パッケージは使わない.
 """
 
@@ -48,12 +48,32 @@ def _from_keychain() -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+def _from_dotenv(name: str = "GROQ_API_KEY") -> str:
+    """カレントディレクトリか, このリポジトリ直下の .env から name=値 を読む (.env は git 管理外)."""
+    from pathlib import Path
+
+    for d in (Path.cwd(), Path(__file__).resolve().parents[2]):
+        f = d / ".env"
+        if not f.is_file():
+            continue
+        for line in f.read_text().splitlines():
+            line = line.strip()
+            if line.startswith("export "):
+                line = line[7:].lstrip()
+            if line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            if k.strip() == name:
+                return v.strip().strip('"').strip("'")
+    return ""
+
+
 def api_key() -> str:
-    """環境変数 GROQ_API_KEY → なければ macOS キーチェーンの順で探す."""
-    key = os.environ.get("GROQ_API_KEY", "").strip() or _from_keychain()
+    """環境変数 GROQ_API_KEY → .env → macOS キーチェーン の順で探す."""
+    key = (os.environ.get("GROQ_API_KEY", "").strip() or _from_dotenv() or _from_keychain())
     if not key:
-        raise GroqError("Groq の API キーが見つかりません. キーチェーンに保存してください "
-                        "(README の「Groq API キーの設定」参照)")
+        raise GroqError("Groq の API キーが見つかりません. .env (cp .env.example .env) か "
+                        "キーチェーンに設定してください (README の「Groq API キーの設定」参照)")
     return key
 
 
