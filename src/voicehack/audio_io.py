@@ -1,0 +1,64 @@
+"""音声の読み込み・録音・書き出し."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from fractions import Fraction
+from pathlib import Path
+
+import numpy as np
+import soundfile as sf
+from scipy.signal import resample_poly
+
+
+@dataclass
+class Audio:
+    x: np.ndarray  # mono float64, [-1, 1]
+    sr: int
+
+    @property
+    def duration(self) -> float:
+        return len(self.x) / self.sr
+
+
+def load(path: str | Path, sr: int | None = None) -> Audio:
+    """ファイルを読み込み mono float64 にする. sr 指定時は polyphase でリサンプル."""
+    x, fs = sf.read(str(path), dtype="float64", always_2d=True)
+    x = x.mean(axis=1)
+    if sr is not None and sr != fs:
+        x = resample(x, fs, sr)
+        fs = sr
+    return Audio(x, int(fs))
+
+
+def resample(x: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
+    frac = Fraction(sr_out, sr_in).limit_denominator(1000)
+    return resample_poly(x, frac.numerator, frac.denominator)
+
+
+def record(seconds: float, sr: int = 16000) -> Audio:
+    """マイクから録音 (要: uv sync --extra mic)."""
+    try:
+        import sounddevice as sd
+    except ImportError as e:  # pragma: no cover
+        raise SystemExit("録音には sounddevice が必要です: uv sync --extra mic") from e
+    warm = int(0.3 * sr)  # マイク起動直後の立ち上がり区間は捨てる
+    # 開始合図のビープ (録音前に鳴らし終える)
+    tb = np.arange(int(0.15 * sr)) / sr
+    sd.play(0.3 * np.sin(2 * np.pi * 880 * tb) * np.hanning(len(tb)), sr)
+    sd.wait()
+    print(f"録音中… {seconds:.1f} 秒", flush=True)
+    x = sd.rec(int(seconds * sr) + warm, samplerate=sr, channels=1, dtype="float64")
+    sd.wait()
+    print("録音終了")
+    x = x[warm:, 0]
+    peak = np.max(np.abs(x))
+    if peak > 1.0:
+        print(f"警告: 入力が 0 dBFS を超えています (peak {20 * np.log10(peak):+.1f} dBFS). "
+              "マイク入力音量を下げるか音源から離れてください")
+    return Audio(x, sr)
+
+
+def save(path: str | Path, audio: Audio) -> None:
+    """32bit float で保存: 正規化しないので解析値 (dBFS/LUFS) とファイルのレベルが一致する."""
+    sf.write(str(path), audio.x, audio.sr, subtype="FLOAT")
