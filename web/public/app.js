@@ -14,6 +14,8 @@ const recipeStatusEl = document.getElementById('recipeStatus');
 const recipeViewEl = document.getElementById('recipeView');
 const sampleScriptEl = document.getElementById('sampleScript');
 const sampleBtn = document.getElementById('sampleBtn');
+const familyPanelEl = document.getElementById('familyPanel');
+const familyListEl = document.getElementById('familyList');
 
 // ---- 発話の区切り方 ----
 const TICK_MS = 50;
@@ -32,6 +34,8 @@ let tickTimer = null;
 let wakeLock = null;
 let chunk = null; // { startedAt, firstVoiceAt, speechMs, lastVoiceAt }
 let noiseFloor = null;
+let prosody = null; // ProsodyMeter (prosody.js): 発話ごとの声の大きさ・伸ばし
+let freqBuf = null;
 let pendingCount = 0;
 let pendingDone = null;
 
@@ -100,12 +104,14 @@ async function transcribe(blob) {
 function renderTranscript() {
   transcriptEl.replaceChildren();
   const segs = [...session.segments].sort((a, b) => a.at.localeCompare(b.at));
-  for (const s of segs) {
+  const voices = describeVoice(segs); // prosody.js
+  segs.forEach((s, i) => {
     const line = el('p', 'line');
     const t = new Date(s.at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
     line.append(el('span', 'line-time', t), el('span', null, s.text));
+    for (const tag of (voices[i] && voices[i].tags) || []) line.append(el('span', 'voice-tag', tag));
     transcriptEl.append(line);
-  }
+  });
   transcriptEl.scrollTop = transcriptEl.scrollHeight;
 }
 
@@ -125,12 +131,12 @@ function waitPending() {
   });
 }
 
-function sendChunk(blob, at) {
+function sendChunk(blob, at, voice) {
   setPending(1);
   transcribe(blob)
     .then((text) => {
       if (text && text.trim()) {
-        session.segments.push({ text: text.trim(), at });
+        session.segments.push({ text: text.trim(), at, voice });
         saveSession();
         renderTranscript();
       }
@@ -150,7 +156,7 @@ function startChunk() {
   rec.onstop = () => {
     if (info.speechMs < MIN_SPEECH_MS || !parts.length) return;
     const blob = new Blob(parts, { type: rec.mimeType || mimeType || 'audio/webm' });
-    sendChunk(blob, new Date(info.firstVoiceAt || info.startedAt).toISOString());
+    sendChunk(blob, new Date(info.firstVoiceAt || info.startedAt).toISOString(), info.voice);
   };
   rec.start();
   recorder = rec;
@@ -158,6 +164,11 @@ function startChunk() {
 }
 
 function cutChunk(restart) {
+  // この発話の声の出し方を記録して、次の発話に向けてリセット
+  if (chunk && prosody) {
+    chunk.voice = prosody.summary();
+    prosody.reset();
+  }
   const rec = recorder;
   recorder = null;
   if (rec && rec.state !== 'inactive') rec.stop();
@@ -176,6 +187,9 @@ function tick() {
   const threshold = Math.max(MIN_THRESHOLD, noiseFloor * 2.5);
   const voiced = rms > threshold;
   if (!voiced) noiseFloor = noiseFloor * 0.95 + rms * 0.05;
+
+  analyser.getFloatFrequencyData(freqBuf);
+  prosody.push(20 * Math.log10(rms + 1e-9), freqBuf, voiced);
 
   const now = Date.now();
   if (voiced) {
@@ -207,8 +221,11 @@ async function start() {
   await audioContext.resume();
   analyser = audioContext.createAnalyser();
   analyser.fftSize = 2048;
+  analyser.smoothingTimeConstant = 0.3; // 伸ばしの検出のため、スペクトルをなめらかにしすぎない
   audioContext.createMediaStreamSource(mediaStream).connect(analyser);
   noiseFloor = null;
+  freqBuf = new Float32Array(analyser.frequencyBinCount);
+  prosody = new ProsodyMeter(TICK_MS);
 
   session = { startedAt: new Date().toISOString(), segments: [], recipeId: null };
   saveSession();
@@ -437,17 +454,19 @@ function renderRecipe(doc) {
 // ---- お試し用の台本 ----
 // [[...]] は感覚的な分量の言葉 (画面で色を付ける)。pause は読み上げの合間に黙る秒数の目安。
 // 何人分か・フライパンの大きさ・焼き時間はわざと言わず、LLM が質問してくるようにしてある。
+// voice は「声を出さずに試す」ときに使う、読み上げたと仮定した声の特徴 (ProsodyMeter#summary と同じ形)。
+const v = (speechSec, meanDb, peakDb, sustainSec) => ({ speechSec, meanDb, peakDb, sustainSec });
 const SAMPLE_SCRIPT = [
-  { say: '今日は卵焼きを作ります。' },
-  { say: '卵を3つ、ボウルに割って、' },
-  { say: '砂糖をスプーンに[[こんもり]]入れます。' },
-  { say: 'お醤油を[[ちょろっと]]、' },
-  { say: 'お塩も[[ぱらぱらっと]]入れて、よーく混ぜます。' },
+  { say: '今日は卵焼きを作ります。', voice: v(1.6, -30, -22, 0.2) },
+  { say: '卵を3つ、ボウルに割って、', voice: v(1.7, -31, -23, 0.3) },
+  { say: '砂糖をスプーンに[[こんもり]]入れます。', voice: v(2.6, -26, -12, 0.4) },
+  { say: 'お醤油を[[ちょろっと]]、', voice: v(1.0, -36, -29, 0.2) },
+  { say: 'お塩も[[ぱらぱらっと]]入れて、よーく混ぜます。', voice: v(2.4, -30, -21, 0.3) },
   { note: 'フライパンを温めるつもりで、15秒ほど黙る', pause: 15 },
-  { say: 'フライパンに油を[[さーーーっと]]ひいて、' },
-  { say: '卵を[[おたまに1杯ぐらい]]流して、火は弱めでね。' },
-  { say: '端っこが[[ぷくぷく]]してきたら、くるくる巻きます。' },
-  { say: 'これを3回くり返したら、できあがり。' },
+  { say: 'フライパンに油を[[さーーーっと]]ひいて、', voice: v(3.0, -29, -21, 1.4) },
+  { say: '卵を[[おたまに1杯ぐらい]]流して、火は弱めでね。', voice: v(2.9, -30, -22, 0.3) },
+  { say: '端っこが[[ぷくぷく]]してきたら、くるくる巻きます。', voice: v(3.2, -31, -23, 0.3) },
+  { say: 'これを3回くり返したら、できあがり。', voice: v(2.2, -30, -22, 0.2) },
 ];
 
 function renderSampleScript() {
@@ -474,7 +493,9 @@ function useSampleScript() {
   for (const line of SAMPLE_SCRIPT) {
     // 黙る箇所は 2 分空いたことにして、LLM に「無音」の区切りとして渡す
     t += (line.note ? 120 : 5) * 1000;
-    if (line.say) segments.push({ text: line.say.replace(/\[\[|\]\]/g, ''), at: new Date(t).toISOString() });
+    if (line.say) {
+      segments.push({ text: line.say.replace(/\[\[|\]\]/g, ''), at: new Date(t).toISOString(), voice: line.voice });
+    }
   }
   session = { startedAt: new Date(t0).toISOString(), segments, recipeId: null };
   saveSession();
@@ -488,6 +509,51 @@ function useSampleScript() {
 renderSampleScript();
 sampleBtn.addEventListener('click', useSampleScript);
 
+// ---- 家族からの質問 (息子がレシピ一覧から聞いて、記録になかったもの) ----
+
+async function loadFamilyQuestions() {
+  let docs;
+  try {
+    docs = await api('/api/recipes?all=1');
+  } catch (_) {
+    return;
+  }
+  familyListEl.replaceChildren();
+  let count = 0;
+  for (const doc of docs) {
+    for (const q of doc.familyQuestions || []) {
+      if (!q.needsMom || q.momAnswer) continue;
+      count++;
+      const item = el('div', 'question');
+      item.append(el('p', 'muted', `「${doc.recipe.title}」について`));
+      item.append(el('p', 'question-text', q.question));
+      const input = el('input', 'question-input');
+      input.type = 'text';
+      input.placeholder = '答えを入力';
+      const actions = el('div', 'question-actions');
+      const voice = el('button', 'btn btn-small', '🎤 声で');
+      voice.addEventListener('click', () => recordAnswer(voice, input));
+      const send = el('button', 'btn btn-secondary btn-small-send', '答える');
+      send.addEventListener('click', async () => {
+        if (!input.value.trim()) return;
+        send.disabled = true;
+        send.textContent = '送っています…';
+        try {
+          await api(`/api/recipes/${doc.id}/reply`, { questionId: q.id, answer: input.value });
+          item.replaceChildren(el('p', 'muted', `「${q.question}」に答えました。レシピにも反映しました`));
+        } catch (err) {
+          send.disabled = false;
+          send.textContent = `もう一度 (${err.message})`;
+        }
+      });
+      actions.append(voice, send);
+      item.append(input, actions);
+      familyListEl.append(item);
+    }
+  }
+  familyPanelEl.hidden = count === 0;
+}
+
 // ---- 起動 ----
 
 startBtn.addEventListener('click', start);
@@ -500,6 +566,8 @@ if (!navigator.mediaDevices || !window.MediaRecorder) {
   startBtn.disabled = true;
   setStatus('このブラウザは録音に対応していません (Safari / Chrome の最新版で開いてください)');
 }
+
+loadFamilyQuestions();
 
 // 再読み込みしても、直前の記録とレシピを復元する
 (async () => {

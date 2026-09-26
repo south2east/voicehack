@@ -77,6 +77,62 @@ function renderDetail(r) {
     for (const t of r.tips) tl.append(el('li', null, t));
     detailEl.append(tl);
   }
+
+  renderQuestions(r);
+}
+
+// ---- わからないところを聞く ----
+
+function renderQuestionItem(q) {
+  const item = el('div', 'qa');
+  item.append(el('p', 'qa-q', `Q. ${q.question}`));
+  item.append(el('p', 'qa-a', q.aiAnswer));
+  if (q.momAnswer) {
+    item.append(el('p', 'qa-mom', `お母さんより: ${q.momAnswer}`));
+  } else if (q.needsMom) {
+    item.append(el('p', 'qa-wait', 'お母さんに聞いています…'));
+  }
+  return item;
+}
+
+function renderQuestions(r) {
+  detailEl.append(el('h2', null, 'わからないところを聞く'));
+  const list = el('div', 'qa-list');
+  for (const q of r.familyQuestions || []) list.append(renderQuestionItem(q));
+  detailEl.append(list);
+
+  const form = el('form', 'ask-form');
+  const input = el('textarea', 'ask-input');
+  input.rows = 2;
+  input.placeholder = '例: 「さーーーっと」ってどれくらい？ / 弱めの火ってどのくらい？';
+  const button = el('button', 'ask-btn', '聞く');
+  button.type = 'submit';
+  const status = el('p', 'ask-status');
+  form.append(input, button, status);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    button.disabled = true;
+    status.textContent = '考えています…';
+    try {
+      const res = await fetch(`/api/recipes/${encodeURIComponent(r.id)}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      list.append(renderQuestionItem(data));
+      input.value = '';
+      status.textContent = data.needsMom ? 'お母さんにも届けました。答えが来たらここに表示されます' : '';
+    } catch (err) {
+      status.textContent = `聞けませんでした: ${err.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+  detailEl.append(form);
 }
 
 async function fetchJson(url) {

@@ -301,3 +301,28 @@ body {
   color: var(--muted);
   font-size: 0.9rem;
 }
+
+.voice-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.family {
+  border: 2px solid var(--accent);
+}
+
+.family .question + .question {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+}
+
+.btn-small-send {
+  padding: 8px 16px;
+  font-size: 0.9rem;
+}

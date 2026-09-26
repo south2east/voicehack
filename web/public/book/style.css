@@ -172,3 +172,72 @@ body {
   margin: 0;
   padding-left: 1.2em;
 }
+
+.qa-list {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.qa {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.qa p {
+  margin: 0 0 4px;
+}
+
+.qa-q {
+  font-weight: 700;
+}
+
+.qa-mom {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.qa-wait,
+.ask-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.ask-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.ask-input {
+  padding: 10px;
+  font-size: 1rem;
+  font-family: inherit;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  resize: vertical;
+}
+
+.ask-btn {
+  align-self: stretch;
+  padding: 0 18px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ask-btn:disabled {
+  opacity: 0.5;
+}
+
+.ask-status {
+  grid-column: 1 / -1;
+  margin: 0;
+}
