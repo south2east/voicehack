@@ -55,7 +55,7 @@ function renderDictionary(entries) {
 }
 
 function renderDetail(r) {
-  document.title = `${r.title} — おふくろの味`;
+  document.title = `${r.title} — Comida caseira`;
   messageEl.hidden = true;
   detailEl.hidden = false;
 

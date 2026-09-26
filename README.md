@@ -2,7 +2,7 @@
 
 音声を入力として, リアルタイム文字起こしと, 声の特徴 (大きさ・高さ・速さ) の解析・雑音分離を行うツール群です.
 
-メインのアプリは **[おふくろの味](#3-おふくろの味-vercel-版)** です。計量せず感覚で料理するお母さんが、
+メインのアプリは **[Comida caseira](#3-comida-caseira-vercel-版)** です。計量せず感覚で料理するお母さんが、
 作りながら話すだけでレシピになり、「さーーっと」のような擬音の分量を声の伸ばし方から推定して確かめ、
 離れて暮らす家族が一覧で見て質問できます。**https://okaasan-recipe.vercel.app**
 
@@ -10,7 +10,7 @@
 |---|---|---|---|
 | [1. リアルタイム文字起こしアプリ](#1-リアルタイム文字起こしアプリ-nodejs) | Node.js | `server.js`, `public/` | ブラウザのマイク入力を Google Cloud Speech-to-Text (Chirp 3) でストリーミング文字起こし. 録音を保存し, 終了後に 2. の解析ツールへ自動で渡す |
 | [2. 音声解析ツール](#2-音声解析ツール-python) | Python | `src/voicehack/`, `experiments/`, `tests/` | スペクトル・大きさ (LUFS)・声の高さ・話す速さの計測, 声と環境音の分離 |
-| [3. おふくろの味 (Vercel 版)](#3-おふくろの味-vercel-版) | Node.js | `web/` | 料理しながら話した声をレシピにまとめ、家族と共有する Web アプリ。https://okaasan-recipe.vercel.app |
+| [3. Comida caseira (Vercel 版)](#3-comida-caseira-vercel-版) | Node.js | `web/` | 料理しながら話した声をレシピにまとめ、家族と共有する Web アプリ。https://okaasan-recipe.vercel.app |
 | 調査ノート | — | `research_notes/`, `reports/` | 録音データのノイズ除去手法の調査 |
 
 1. と 2. の設定はリポジトリ直下の **`.env`** (ひな形: `.env.example`) から読みます. `.env` は git 管理外です.
@@ -345,7 +345,7 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 
 ---
 
-## 3. おふくろの味 (Vercel 版)
+## 3. Comida caseira (Vercel 版)
 
 計量せず感覚で料理するお母さんが、**作りながら話すだけで**レシピになる Web アプリです。
 「さーーっと」「こんもり」のような感覚の分量を、**言葉と声の出し方**から推定して「これくらい？」と確かめ、
