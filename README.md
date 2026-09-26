@@ -1,5 +1,8 @@
 # voicehack
 
+話し声を録音・解析して, **スペクトル / スペクトログラム, 大きさ (LUFS), 声の高さと抑揚, 話す速さ** を数値と図で出し,
+**声と環境音を分離** する Python ツールです. 各処理は論文・規格にもとづいて実装し, 実録音で評価しています.
+
 入力した音声について,
 
 | 機能 | 出力 | 実装の根拠 (論文・規格) |
@@ -16,10 +19,35 @@
 
 ## セットアップ
 
+動作確認環境: macOS (Apple Silicon), Python 3.11. Linux でも動きますが, マイク録音の開始音・`afplay`・
+キーチェーン・デモ音声作成 (`say`) は macOS 前提です.
+
 ```bash
-cd ~/voicehack
-uv sync                 # マイク録音も使うなら: uv sync --extra mic
+# 1. uv (Python のパッケージ管理ツール) が無ければ入れる
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. 取得して依存をインストール
+git clone <このリポジトリの URL> voicehack
+cd voicehack
+uv sync --extra mic                          # 基本機能 + マイク録音
+uv sync --extra mic --extra asr --extra dnn  # 全部入り (音声認識 + 深層学習による分離, 約 1.2 GB)
+
+# 3. Groq で文字起こしする場合だけ: 自分の API キーを .env に書く
+cp .env.example .env                         # .env の GROQ_API_KEY= に自分のキーを書く (.env は git に入らない)
+
+# 4. 動作確認
+uv run pytest -q
+uv run voicehack record -d 10 --asr          # ピッと鳴ったら話す
 ```
+
+| extra | 入るもの | 使う機能 |
+|---|---|---|
+| (なし) | numpy, scipy, matplotlib, soundfile | 解析・従来法の分離 |
+| `mic` | sounddevice | `record` (マイク録音) |
+| `asr` | faster-whisper, fugashi, unidic-lite | `--asr` (ローカル文字起こし). 初回に Whisper small (約 480 MB) を取得 |
+| `dnn` | torch, torchaudio, speechbrain | `--dnn` (声と重なった物音の分離). 初回に SepFormer (約 110 MB) を取得 |
+
+`--asr groq` は追加パッケージ不要です (API キーのみ).
 
 ## 使い方
 
@@ -83,6 +111,12 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 
 キーを探す順番は 環境変数 `GROQ_API_KEY` → `.env` → キーチェーン です.
 `.gitignore` は `.env` / `.env.*` (`.env.example` を除く) / `*.key` を除外しています.
+
+## 評価用データについて
+
+`experiments/eval_rate.py` と `experiments/eval_overlap.py` は, 作者の実録音 (`out/` 以下) を使います.
+録音は個人の声なのでリポジトリには含めていません. 自分で評価する場合は, 各スクリプト冒頭の説明に沿って
+同じ条件で録音し (`uv run voicehack record ...`), 区間の定義を書き換えてください.
 
 ## 検証 (`uv run pytest`)
 
@@ -158,3 +192,12 @@ cp .env.example .env    # その後 .env の GROQ_API_KEY= にキーを書く
 - D. Wang, S. S. Narayanan, IEEE TASLP 15(8), 2007.
 - N. Morgan, E. Fosler-Lussier, Proc. ICASSP, 1998.
 - A. Radford et al., "Robust speech recognition via large-scale weak supervision," ICML 2023 (Whisper).
+
+## 使用している外部モデル・データ
+
+| 名前 | 用途 | ライセンス |
+|---|---|---|
+| Whisper small (`Systran/faster-whisper-small`) | `--asr` のローカル文字起こし | MIT |
+| Groq `whisper-large-v3-turbo` | `--asr groq` (クラウド API, 各自の API キーで利用) | Groq の利用規約に従う |
+| SepFormer (`speechbrain/sepformer-dns4-16k-enhancement`) | `--dnn` の音声強調 | Apache-2.0 |
+| UniDic (unidic-lite) | 読み仮名 → モーラ数 | BSD-3-Clause |
